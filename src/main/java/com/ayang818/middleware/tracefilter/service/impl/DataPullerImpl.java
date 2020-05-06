@@ -1,7 +1,6 @@
 package com.ayang818.middleware.tracefilter.service.impl;
 
 import com.ayang818.middleware.tracefilter.io.DataStreamHandler;
-import com.ayang818.middleware.tracefilter.io.impl.DataStreamHandlerImpl;
 import com.ayang818.middleware.tracefilter.service.DataPuller;
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.Response;
@@ -11,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -37,9 +37,11 @@ public class DataPullerImpl implements DataPuller {
         AsyncHttpClient httpClient = getHttpClient();
         String dataSourceUrl = "http://localhost:" + port + "/api/traceData" + dataId;
         Future<Response> response = httpClient.prepareGet(dataSourceUrl).execute();
-        try (InputStream dataStream = response.get().getResponseBodyAsStream()) {
+        try {
+            InputStream dataStream = response.get().getResponseBodyAsStream();
+            // 开始处理数据读入流
             dataStreamHandler.handleDataStream(dataStream);
-        } catch (InterruptedException | ExecutionException | IOException e) {
+        } catch (InterruptedException | ExecutionException e) {
             e.printStackTrace();
         }
     }
