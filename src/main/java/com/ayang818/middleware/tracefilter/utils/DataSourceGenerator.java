@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.UUID;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
@@ -17,16 +17,16 @@ public class DataSourceGenerator {
 
     private static final String BASE_DIR = "D:/middlewaredata/";
 
-    private static final long TARGET_FILE_SIZE = 1024 * 1024 * 1000;
+    private static final long TARGET_FILE_SIZE = 1024 * 1024 * 100;
 
-    private static final Executor SINGLE_FLUSH_THREAD = Executors.newSingleThreadExecutor();
+    private static final ExecutorService FLUSH_THREAD = Executors.newSingleThreadExecutor();
 
     private static final String[] STATUS_TYPE = new String[]{"http.status_code:200", "http.status_code:404", "error:1"};
 
     public static void main(String[] args) {
         DataSourceGenerator generator = new DataSourceGenerator();
-        generator.mmapGenerate();
-        //generator.nioGenerate();
+        //generator.mmapGenerate();
+        generator.nioGenerate();
         //generator.bioGenerate();
     }
 
@@ -41,13 +41,17 @@ public class DataSourceGenerator {
         try (RandomAccessFile memoryAccessFile = new RandomAccessFile(BASE_DIR + fileName, "rw")) {
             FileChannel fileChannel = memoryAccessFile.getChannel();
             MappedByteBuffer mappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, TARGET_FILE_SIZE);
-            int position = 0;
+            // 设置内存初始偏移段
+            int offset = 0;
             while (true) {
                 byte[] bytes = generateLine().getBytes();
-                if (position + bytes.length > TARGET_FILE_SIZE) break;
-                mappedByteBuffer.position(position);
+                // 计算内存偏移段+即将加入的字节数量是否超出一开始的限制
+                if (offset + bytes.length > TARGET_FILE_SIZE) break;
+                // 设置映射起始位置
+                mappedByteBuffer.position(offset);
                 mappedByteBuffer.put(bytes);
-                position += bytes.length;
+                // 移动偏移段
+                offset += bytes.length;
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -56,6 +60,72 @@ public class DataSourceGenerator {
         long delta = System.currentTimeMillis() - start;
         System.out.println("[内存映射] : 数据生成完成");
         System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
+    }
+
+    /**
+     * nio + 缓冲区
+     */
+    public void nioGenerate() {
+        String fileName = "nio_data.txt";
+        long start = System.currentTimeMillis();
+        System.out.println("开始生成数据");
+
+        // 申请 100条 记录的堆外内存
+        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(192 * 100);
+        // 申请 64KB 的二级缓存
+        ByteBuffer flushBuffer = ByteBuffer.allocateDirect(1024 * 64);
+
+        try (RandomAccessFile randomAccessFile = new RandomAccessFile(BASE_DIR + fileName, "rw");
+             FileChannel channel = randomAccessFile.getChannel()) {
+            while (true) {
+                byte[] bytesLine = generateLine().getBytes();
+                if (channel.size() + bytesLine.length >= TARGET_FILE_SIZE) break;
+                int remain = byteBuffer.remaining();
+                if (bytesLine.length > remain) {
+                    flush(byteBuffer, flushBuffer, channel);
+                }
+                byteBuffer.put(bytesLine);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        long delta = System.currentTimeMillis() - start;
+        System.out.println("[缓冲区nio] : 数据生成完成");
+        System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
+    }
+
+
+    /**
+     * @param byteBuffer 一级缓存
+     * @param flushBuffer 二级刷盘缓存
+     * @param channel 管道
+     * @description 缓冲区容量不足，写入二级缓存，若二级缓存即将慢，进行刷盘
+     */
+    public void flush(ByteBuffer byteBuffer, ByteBuffer flushBuffer, FileChannel channel) {
+        // 反转一级缓存为读Mode
+        byteBuffer.flip();
+        // 剩余可读缓存
+        int remain = byteBuffer.remaining();
+        byte[] records = new byte[remain];
+        byteBuffer.get(records);
+        byteBuffer.clear();
+        // 其他线程异步刷盘
+        FLUSH_THREAD.execute(() -> {
+            try {
+                // 检查二级缓存是否足够
+                if (flushBuffer.remaining() < records.length) {
+                    // 读出二级缓存中的内容
+                    flushBuffer.flip();
+                    // 写入管道
+                    channel.write(flushBuffer);
+                    flushBuffer.clear();
+                }
+                flushBuffer.put(records);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
     }
 
     /**
@@ -95,74 +165,6 @@ public class DataSourceGenerator {
         long delta = System.currentTimeMillis() - start;
         System.out.println("[缓冲区bio] : 数据生成完成");
         System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
-    }
-
-
-    /**
-     * nio + 缓冲区
-     */
-    public void nioGenerate() {
-        String fileName = "nio_data.txt";
-        long start = System.currentTimeMillis();
-        System.out.println("开始生成数据");
-
-        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(1024 * 32);
-
-        File dataFile = new File(BASE_DIR + fileName);
-        FileOutputStream fileOutputStream = null;
-        FileChannel outputChannel = null;
-
-        try {
-            fileOutputStream = new FileOutputStream(dataFile);
-            outputChannel = fileOutputStream.getChannel();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-
-        while (!dataFile.exists() || dataFile.length() < TARGET_FILE_SIZE) {
-            // 若文件不存在，则创建
-            if (!dataFile.exists()) {
-                try {
-                    dataFile.createNewFile();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-
-            // 生成一行数据
-            String lineString = generateLine();
-            byte[] lineBytes = lineString.getBytes();
-            // 判断缓冲区是否足够
-            if (byteBuffer.remaining() < lineBytes.length) {
-                // 缓存区刷盘
-                flush(byteBuffer, outputChannel);
-            }
-            // 缓存区写入数据
-            byteBuffer.put(lineBytes);
-        }
-
-        long delta = System.currentTimeMillis() - start;
-        System.out.println("[缓冲区nio] : 数据生成完成");
-        System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
-    }
-
-
-    /**
-     * @param byteBuffer
-     * @param outputChannel
-     * @description 缓冲区容量不足，进行刷盘
-     */
-    public void flush(ByteBuffer byteBuffer, FileChannel outputChannel) {
-        // 反转准备读
-        byteBuffer.flip();
-        while (byteBuffer.hasRemaining()) {
-            try {
-                outputChannel.write(byteBuffer);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        byteBuffer.clear();
     }
 
     /**
