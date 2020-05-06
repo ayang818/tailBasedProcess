@@ -31,38 +31,6 @@ public class DataSourceGenerator {
     }
 
     /**
-     * 使用内存映射技术进行文件写入
-     */
-    public void mmapGenerate() {
-        String fileName = "mmap_data.txt";
-        long start = System.currentTimeMillis();
-        System.out.println("开始生成数据");
-
-        try (RandomAccessFile memoryAccessFile = new RandomAccessFile(BASE_DIR + fileName, "rw")) {
-            FileChannel fileChannel = memoryAccessFile.getChannel();
-            MappedByteBuffer mappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, TARGET_FILE_SIZE);
-            // 设置内存初始偏移段
-            int offset = 0;
-            while (true) {
-                byte[] bytes = generateLine().getBytes();
-                // 计算内存偏移段+即将加入的字节数量是否超出一开始的限制
-                if (offset + bytes.length > TARGET_FILE_SIZE) break;
-                // 设置映射起始位置
-                mappedByteBuffer.position(offset);
-                mappedByteBuffer.put(bytes);
-                // 移动偏移段
-                offset += bytes.length;
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        long delta = System.currentTimeMillis() - start;
-        System.out.println("[内存映射] : 数据生成完成");
-        System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
-    }
-
-    /**
      * nio + 缓冲区
      */
     public void nioGenerate() {
@@ -126,6 +94,38 @@ public class DataSourceGenerator {
                 e.printStackTrace();
             }
         });
+    }
+
+    /**
+     * 使用内存映射技术进行文件写入
+     */
+    public void mmapGenerate() {
+        String fileName = "mmap_data.txt";
+        long start = System.currentTimeMillis();
+        System.out.println("开始生成数据");
+
+        try (RandomAccessFile memoryAccessFile = new RandomAccessFile(BASE_DIR + fileName, "rw")) {
+            FileChannel fileChannel = memoryAccessFile.getChannel();
+            MappedByteBuffer mappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, TARGET_FILE_SIZE);
+            // 设置内存初始偏移段
+            int offset = 0;
+            while (true) {
+                byte[] bytes = generateLine().getBytes();
+                // 计算内存偏移段+即将加入的字节数量是否超出一开始的限制
+                if (offset + bytes.length > TARGET_FILE_SIZE) break;
+                // 设置映射起始位置
+                mappedByteBuffer.position(offset);
+                mappedByteBuffer.put(bytes);
+                // 移动偏移段
+                offset += bytes.length;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        long delta = System.currentTimeMillis() - start;
+        System.out.println("[内存映射] : 数据生成完成");
+        System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
     }
 
     /**
