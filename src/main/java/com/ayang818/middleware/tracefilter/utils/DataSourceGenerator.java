@@ -18,13 +18,15 @@ import java.util.concurrent.Executors;
  **/
 public class DataSourceGenerator {
 
-    private static final String BASE_DIR = "/var/data/";
+    private static final String BASE_DIR = "D:/middlewaredata/";
 
     private static final long TARGET_FILE_SIZE = 1024 * 1024 * 1024;
 
     private static final ExecutorService FLUSH_THREAD = Executors.newSingleThreadExecutor();
 
     private static final byte[] TMP_CACHE = new byte[1024 * 64];
+
+    public static UUID uuid = UUID.randomUUID();
 
     private static final String[] STATUS_TYPE = new String[]{"http.status_code:200", "http.status_code:404", "error:1"};
 
@@ -33,7 +35,7 @@ public class DataSourceGenerator {
 
         generator.nioGenerate();
 
-        generator.mmapGenerate();
+        //generator.mmapGenerate();
 
         //generator.bioGenerate();
     }
@@ -66,8 +68,8 @@ public class DataSourceGenerator {
                 if (channel.size() + bytesLine.length >= TARGET_FILE_SIZE) break;
                 int remain = byteBuffer.remaining();
                 if (bytesLine.length > remain) {
-                    //flush(byteBuffer, flushBuffer, channel);
-                    flush(byteBuffer, channel);
+                    flush(byteBuffer, flushBuffer, channel);
+                    //flush(byteBuffer, channel);
                 }
                 byteBuffer.put(bytesLine);
             }
@@ -80,6 +82,11 @@ public class DataSourceGenerator {
         System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
     }
 
+    /**
+     * @description 普通的刷盘
+     * @param byteBuffer
+     * @param channel
+     */
     private void flush(ByteBuffer byteBuffer, FileChannel channel) {
         byteBuffer.flip();
         try {
@@ -103,12 +110,11 @@ public class DataSourceGenerator {
         // 剩余可读缓存
         int remain = byteBuffer.remaining();
         byteBuffer.get(TMP_CACHE, TMP_CACHE.length - remain, remain);
-        byteBuffer.clear();
         // 其他线程异步刷盘
         FLUSH_THREAD.execute(() -> {
             try {
                 // 检查二级缓存是否足够
-                if (flushBuffer.remaining() < TMP_CACHE.length) {
+                if (flushBuffer.remaining() < remain) {
                     // 读出二级缓存中的内容
                     flushBuffer.flip();
                     // 写入管道
@@ -121,6 +127,7 @@ public class DataSourceGenerator {
                 e.printStackTrace();
             }
         });
+        byteBuffer.clear();
     }
 
     /**
@@ -135,7 +142,6 @@ public class DataSourceGenerator {
             FileChannel fileChannel = memoryAccessFile.getChannel();
             MappedByteBuffer mappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, TARGET_FILE_SIZE);
 
-            mappedByteBuffer.slice();
             // 设置内存初始偏移段
             int offset = 0;
             while (true) {
@@ -204,7 +210,6 @@ public class DataSourceGenerator {
      */
     public String generateLine() {
         StringBuilder res = new StringBuilder();
-        UUID uuid = UUID.randomUUID();
 
         res.append(uuid.toString()).append("|");
         res.append(System.currentTimeMillis()).append("|");
