@@ -8,13 +8,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-import static com.ayang818.middleware.tracefilter.utils.HttpUtil.*;
+import static com.ayang818.middleware.tracefilter.utils.HttpUtil.getHttpClient;
 
 /**
  * @author 杨丰畅
@@ -36,7 +34,7 @@ public class DataPullerImpl implements DataPuller {
         Integer port = Integer.valueOf(dataport);
         AsyncHttpClient httpClient = getHttpClient();
         String dataSourceUrl = "http://localhost:" + port + "/api/traceData" + dataId;
-        Future<Response> response = httpClient.prepareGet(dataSourceUrl).execute();
+        Future<Response> response = httpClient.prepareHead(dataSourceUrl).execute();
         try {
             InputStream dataStream = response.get().getResponseBodyAsStream();
             // 开始处理数据读入流
@@ -45,6 +43,5 @@ public class DataPullerImpl implements DataPuller {
             e.printStackTrace();
         }
     }
-
 
 }

@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
-import javax.servlet.ServletOutputStream;
 import javax.servlet.http.HttpServletResponse;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -19,6 +18,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Arrays;
 
 /**
  * @author 杨丰畅
@@ -54,10 +54,10 @@ public class ReadyController {
     }
 
     @RequestMapping(value = "api/traceData1", method = RequestMethod.GET)
-    public void test(HttpServletResponse response) {
+    public void pullTest(HttpServletResponse response) {
         try {
             OutputStream outputStream = response.getOutputStream();
-            BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/data.txt"), StandardCharsets.UTF_8);
+            BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/nio_data.txt"), StandardCharsets.UTF_8);
             char[] charBuffer = new char[1024];
             byte[] byteBuffer = new byte[1024];
             while (bufferedReader.read(charBuffer) != -1) {

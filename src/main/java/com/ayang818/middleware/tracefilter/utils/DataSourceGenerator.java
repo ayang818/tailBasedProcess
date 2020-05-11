@@ -4,6 +4,9 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -15,31 +18,44 @@ import java.util.concurrent.Executors;
  **/
 public class DataSourceGenerator {
 
-    private static final String BASE_DIR = "D:/middlewaredata/";
+    private static final String BASE_DIR = "/var/data/";
 
-    private static final long TARGET_FILE_SIZE = 1024 * 1024 * 100;
+    private static final long TARGET_FILE_SIZE = 1024 * 1024 * 1024;
 
     private static final ExecutorService FLUSH_THREAD = Executors.newSingleThreadExecutor();
+
+    private static final byte[] TMP_CACHE = new byte[1024 * 64];
 
     private static final String[] STATUS_TYPE = new String[]{"http.status_code:200", "http.status_code:404", "error:1"};
 
     public static void main(String[] args) {
         DataSourceGenerator generator = new DataSourceGenerator();
-        //generator.mmapGenerate();
+
         generator.nioGenerate();
+
+        generator.mmapGenerate();
+
         //generator.bioGenerate();
     }
 
     /**
-     * nio + 缓冲区
+     * nio + 多级缓存 + 异步写入 —— 处理大文件读写 小内存机器 的最佳方案
      */
     public void nioGenerate() {
         String fileName = "nio_data.txt";
+        Path path = Paths.get(BASE_DIR + fileName);
+        if (Files.exists(path)) {
+            try {
+                Files.delete(path);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
         long start = System.currentTimeMillis();
         System.out.println("开始生成数据");
 
         // 申请 100条 记录的堆外内存
-        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(192 * 100);
+        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(1024 * 64);
         // 申请 64KB 的二级缓存
         ByteBuffer flushBuffer = ByteBuffer.allocateDirect(1024 * 64);
 
@@ -50,7 +66,8 @@ public class DataSourceGenerator {
                 if (channel.size() + bytesLine.length >= TARGET_FILE_SIZE) break;
                 int remain = byteBuffer.remaining();
                 if (bytesLine.length > remain) {
-                    flush(byteBuffer, flushBuffer, channel);
+                    //flush(byteBuffer, flushBuffer, channel);
+                    flush(byteBuffer, channel);
                 }
                 byteBuffer.put(bytesLine);
             }
@@ -63,33 +80,43 @@ public class DataSourceGenerator {
         System.out.println("花费 " + delta + " 毫秒，速度为 " + String.format("%.2f", ((double) TARGET_FILE_SIZE / (1024 * 1024)) / (delta / 1000)) + " MB/S");
     }
 
+    private void flush(ByteBuffer byteBuffer, FileChannel channel) {
+        byteBuffer.flip();
+        try {
+            channel.write(byteBuffer);
+            byteBuffer.clear();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
 
     /**
-     * @param byteBuffer 一级缓存
+     * @param byteBuffer  一级缓存
      * @param flushBuffer 二级刷盘缓存
-     * @param channel 管道
-     * @description 缓冲区容量不足，写入二级缓存，若二级缓存即将慢，进行刷盘
+     * @param channel     管道
+     * @description 缓冲区容量不足，写入二级缓存，若二级缓存即将满，进行刷盘
      */
     public void flush(ByteBuffer byteBuffer, ByteBuffer flushBuffer, FileChannel channel) {
         // 反转一级缓存为读Mode
         byteBuffer.flip();
         // 剩余可读缓存
         int remain = byteBuffer.remaining();
-        byte[] records = new byte[remain];
-        byteBuffer.get(records);
+        byteBuffer.get(TMP_CACHE, TMP_CACHE.length - remain, remain);
         byteBuffer.clear();
         // 其他线程异步刷盘
         FLUSH_THREAD.execute(() -> {
             try {
                 // 检查二级缓存是否足够
-                if (flushBuffer.remaining() < records.length) {
+                if (flushBuffer.remaining() < TMP_CACHE.length) {
                     // 读出二级缓存中的内容
                     flushBuffer.flip();
                     // 写入管道
                     channel.write(flushBuffer);
                     flushBuffer.clear();
                 }
-                flushBuffer.put(records);
+                // remain 是 该子线程对主线程变量的一份拷贝
+                flushBuffer.put(TMP_CACHE, TMP_CACHE.length - remain, remain);
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -107,6 +134,8 @@ public class DataSourceGenerator {
         try (RandomAccessFile memoryAccessFile = new RandomAccessFile(BASE_DIR + fileName, "rw")) {
             FileChannel fileChannel = memoryAccessFile.getChannel();
             MappedByteBuffer mappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, TARGET_FILE_SIZE);
+
+            mappedByteBuffer.slice();
             // 设置内存初始偏移段
             int offset = 0;
             while (true) {
@@ -129,7 +158,7 @@ public class DataSourceGenerator {
     }
 
     /**
-     * 带缓冲区的bio，目前看来这是表现最好的方式了
+     * 带缓冲区的bio，仅供参考
      */
     public void bioGenerate() {
         String fileName = "bio_data.txt";
