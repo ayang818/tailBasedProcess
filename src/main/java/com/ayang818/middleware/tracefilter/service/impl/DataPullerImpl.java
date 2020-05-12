@@ -2,15 +2,22 @@ package com.ayang818.middleware.tracefilter.service.impl;
 
 import com.ayang818.middleware.tracefilter.io.DataStreamHandler;
 import com.ayang818.middleware.tracefilter.service.DataPuller;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.asynchttpclient.AsyncHttpClient;
+import org.asynchttpclient.ListenableFuture;
+import org.asynchttpclient.Request;
 import org.asynchttpclient.Response;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.InputStream;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
+import java.io.IOException;
 
 import static com.ayang818.middleware.tracefilter.utils.HttpUtil.getHttpClient;
 
@@ -21,6 +28,8 @@ import static com.ayang818.middleware.tracefilter.utils.HttpUtil.getHttpClient;
  **/
 @Service
 public class DataPullerImpl implements DataPuller {
+
+    private static final Logger logger = LoggerFactory.getLogger(DataPuller.class);
 
     @Value("${env.dataId}")
     String dataId;
@@ -34,12 +43,11 @@ public class DataPullerImpl implements DataPuller {
         Integer port = Integer.valueOf(dataport);
         AsyncHttpClient httpClient = getHttpClient();
         String dataSourceUrl = "http://localhost:" + port + "/api/traceData" + dataId;
-        Future<Response> response = httpClient.prepareHead(dataSourceUrl).execute();
+        CloseableHttpClient client = HttpClients.createDefault();
         try {
-            InputStream dataStream = response.get().getResponseBodyAsStream();
-            // 开始处理数据读入流
-            dataStreamHandler.handleDataStream(dataStream);
-        } catch (InterruptedException | ExecutionException e) {
+            HttpResponse response = client.execute(new HttpGet(dataSourceUrl));
+            dataStreamHandler.handleDataStream(response.getEntity().getContent());
+        } catch (IOException e) {
             e.printStackTrace();
         }
     }

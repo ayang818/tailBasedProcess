@@ -44,6 +44,7 @@ public class ReadyController {
         String dataport = null;
         if (port != null) {
             dataport = port.getDataport();
+            logger.info("获取到端口参数 {}", dataport);
             // 开始从数据流中拉取数据
             dataPuller.pulldata(dataport);
         } else {
@@ -55,8 +56,7 @@ public class ReadyController {
 
     @RequestMapping(value = "api/traceData1", method = RequestMethod.GET)
     public void pullTest(HttpServletResponse response) {
-        try {
-            OutputStream outputStream = response.getOutputStream();
+        try (OutputStream outputStream = response.getOutputStream()){
             BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/nio_data.txt"), StandardCharsets.UTF_8);
             char[] charBuffer = new char[1024];
             byte[] byteBuffer = new byte[1024];

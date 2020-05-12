@@ -5,7 +5,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
+import java.util.Arrays;
 
 /**
  * @author 杨丰畅
@@ -25,14 +30,52 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     /**
      * 换行标识符
      */
-    private static final String NEXT_LINE_FLAG = "\n";
+    private static final char NEXT_LINE_FLAG = '\n';
 
     /**
-     * @description 对于输入容器中的输入流做处理
-     * @param dataStream
+     * 大部分单条数据长度
      */
+    private static final Integer NORMAL_PER_LINE_SIZE = 121;
+
+
     @Override
     public void handleDataStream(InputStream dataStream) {
-
+        ReadableByteChannel inChannel = Channels.newChannel(dataStream);
+        // set nio read Buffer
+        ByteBuffer readByteBuffer = ByteBuffer.allocateDirect(defaultReadBufferSize);
+        try {
+            handleLineByLine(inChannel, readByteBuffer);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
+
+    @Override
+    public void handleLineByLine(ReadableByteChannel inChannel, ByteBuffer readByteBuffer) throws IOException {
+        byte[] bytes = new byte[defaultReadBufferSize];
+        StringBuilder strbuilder = new StringBuilder();
+        while (inChannel.read(readByteBuffer) != -1) {
+            // 反转准备读
+            readByteBuffer.flip();
+            int bytesLen = readByteBuffer.remaining();
+            // 读入临时bytes数组
+            readByteBuffer.get(bytes, 0, bytesLen);
+            readByteBuffer.clear();
+            String tmpstr = new String(bytes, 0, bytesLen);
+            char[] chars = tmpstr.toCharArray();
+            for (int i = 0; i < chars.length; i++) {
+                if (chars[i] == NEXT_LINE_FLAG) {
+                    // 得到一行数据
+                    String lineData = strbuilder.toString();
+                    System.out.println(lineData);
+                    // TODO how to handle this line data
+                    strbuilder.delete(0, strbuilder.length());
+                } else {
+                    strbuilder.append(chars[i]);
+                }
+            }
+        }
+    }
+
+
 }
