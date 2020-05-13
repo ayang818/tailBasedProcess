@@ -5,8 +5,8 @@
     <groupId>com.ayang818.middleware</groupId>
     <artifactId>trace-fliter</artifactId>
     <version>1.0.0</version>
-    <name>trace-fliter</name>
-    <description>trace-fliter</description>
+    <name>trace-filter</name>
+    <description>trace-filter</description>
 
     <properties>
         <java.version>1.8</java.version>

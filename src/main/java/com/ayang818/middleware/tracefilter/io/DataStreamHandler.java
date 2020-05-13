@@ -12,16 +12,25 @@ import java.nio.channels.ReadableByteChannel;
  **/
 public interface DataStreamHandler {
 
+
     /**
-     * @description 对于输入容器中的输入流做处理
      * @param dataStream 从输入容器读到的数据流
+     * @description 对于输入容器中的输入流做处理
      */
     void handleDataStream(InputStream dataStream);
 
     /**
-     * @description 逐行分解数据，对于没有问题的数据
-     * @param inChannel
-     * @param readByteBuffer
+     * @param inChannel      读入管道
+     * @param readByteBuffer 读入缓存
+     * @description 将数据分解成行为单位
      */
-    void handleLineByLine(ReadableByteChannel inChannel, ByteBuffer readByteBuffer) throws IOException;
+    void filterLine(ReadableByteChannel inChannel, ByteBuffer readByteBuffer) throws IOException;
+
+
+    /**
+     * @description 处理每行数据
+     * @param line 单行数据
+     * @param count
+     */
+    void handleLine(String line, Integer count);
 }

@@ -3,7 +3,6 @@ package com.ayang818.middleware.tracefilter.utils;
 import com.google.common.base.Splitter;
 
 import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author 杨丰畅
@@ -13,28 +12,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class SplitterUtil {
 
     public static void main(String[] args) {
-        String tmp = "http.status_code:200&error:1";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i<=10000; i++) {
-            sb.append(tmp);
-            if (i < 10000) {
-                sb.append("&");
-            }
-        }
-
-        //long start1 = System.currentTimeMillis();
-        //String[] res1 = baseSplit(sb.toString(), "&");
-        //System.out.printf("spend %d\n", System.currentTimeMillis() - start1);
-        //System.out.println(res1.length);
-        //System.out.println(Arrays.toString(res1));
-        //long start2 = System.currentTimeMillis();
-        //Iterable<String> stringIterable = extendSplit(sb.toString(), "&");
-        //System.out.printf("spend %d\n", System.currentTimeMillis() - start2);
-        //AtomicInteger i = new AtomicInteger();
-        //String[] res2 = new String[res1.length+1];
-        //stringIterable.forEach((str) -> {res2[i.get()] = str; i.getAndIncrement();});
-        //System.out.println(Arrays.toString(res2));
-        baseSplit(sb.toString(), "&");
+        String tmp1 = "d614959183521b4b|1587457762878000|52637ab771da6ae6|d614959183521b4b|304284|Loginc|getAddress|192.168.1.2|http.status_code:200";
+        String[] res = tmp1.split("\\|");
+        System.out.println(Arrays.toString(res));
     }
 
     /**

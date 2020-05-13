@@ -56,6 +56,7 @@ public class ReadyController {
 
     @RequestMapping(value = "api/traceData1", method = RequestMethod.GET)
     public void pullTest(HttpServletResponse response) {
+        logger.info("接收到请求，开始输出数据......");
         try (OutputStream outputStream = response.getOutputStream()){
             BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/nio_data.txt"), StandardCharsets.UTF_8);
             char[] charBuffer = new char[1024];
@@ -67,6 +68,7 @@ public class ReadyController {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        logger.info("输出数据完毕");
     }
 
 
