@@ -54,11 +54,11 @@ public class ReadyController {
         return "";
     }
 
-    @RequestMapping(value = "api/traceData1", method = RequestMethod.GET)
+    @RequestMapping(value = "/trace1.data", method = RequestMethod.GET)
     public void pullTest(HttpServletResponse response) {
         logger.info("接收到请求，开始输出数据......");
         try (OutputStream outputStream = response.getOutputStream()){
-            BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/nio_data.txt"), StandardCharsets.UTF_8);
+            BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/trace2.data"), StandardCharsets.UTF_8);
             char[] charBuffer = new char[1024];
             byte[] byteBuffer = new byte[1024];
             while (bufferedReader.read(charBuffer) != -1) {

@@ -42,7 +42,8 @@ public class DataPullerImpl implements DataPuller {
         assert dataId == null : "应用数据源没有正确设置";
         Integer port = Integer.valueOf(dataport);
         AsyncHttpClient httpClient = getHttpClient();
-        String dataSourceUrl = "http://localhost:" + port + "/api/traceData" + dataId;
+        // 根据环境变量中的容器编号，拉取不同源头的数据，数据URL ：http://localhost:port/trace${imageNumber}.data
+        String dataSourceUrl = "http://localhost:" + port + "/trace" + dataId + ".data";
         CloseableHttpClient client = HttpClients.createDefault();
         try {
             logger.info("开始连接数据源......");

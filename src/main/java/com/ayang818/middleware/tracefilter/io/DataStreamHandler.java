@@ -31,6 +31,7 @@ public interface DataStreamHandler {
      * @description 处理每行数据
      * @param line 单行数据
      * @param count
+     * @return
      */
-    void handleLine(String line, Integer count);
+    boolean handleLine(String line, Integer count);
 }
