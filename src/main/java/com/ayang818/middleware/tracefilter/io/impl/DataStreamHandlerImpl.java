@@ -6,7 +6,6 @@ import com.ayang818.middleware.tracefilter.io.DataStreamHandler;
 import com.ayang818.middleware.tracefilter.pojo.dto.Trace;
 import com.ayang818.middleware.tracefilter.utils.SplitterUtil;
 import com.ayang818.middleware.tracefilter.utils.WsClient;
-import io.netty.channel.ChannelFuture;
 import org.asynchttpclient.ws.WebSocket;
 import org.asynchttpclient.ws.WebSocketListener;
 import org.asynchttpclient.ws.WebSocketUpgradeHandler;
@@ -19,13 +18,12 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author 杨丰畅
@@ -61,7 +59,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     private static final String BAN_ERROR_CODE = "1";
 
     private static final ConcurrentHashMap<String, Trace> TRACE_MAP =
-            new ConcurrentHashMap<>(2048);
+            new ConcurrentHashMap<>(8192);
 
     private static final HashMap<String, Integer> tmpMap = new HashMap<>();
 
@@ -69,9 +67,17 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
     private static WebSocket wsclient = null;
 
+    private static boolean stdoutFlag = true;
+
     private static final Integer REMOVE_ANYWAY_THRESHOLD = 100000;
 
     private static final Integer CHECK_TRACE_MAP_INTERVAL = 20000;
+
+    private static Integer totalErrSum = 0;
+
+    private static AtomicInteger scanNum = new AtomicInteger(0);
+
+    private Set<String> traceIdSet = new ConcurrentSkipListSet<>();
 
     public static final WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
             .addWebSocketListener(new WebSocketListener() {
@@ -126,7 +132,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         wsclient = WsClient.getWebSocketClient(wsHandler);
         if (wsclient == null) {
             logger.info("连接建立失败......");
-            return ;
+            return;
         }
         logger.info("同数据汇总中心长连接建立成功......");
         ReadableByteChannel inChannel = Channels.newChannel(dataStream);
@@ -160,7 +166,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         int wrongLineNumber = 0;
 
         // 在第几行检查Map
-        int checkLine = 30000;
+        int checkLine = 40000;
 
         while (inChannel.read(readByteBuffer) != -1) {
             // 反转准备读
@@ -174,8 +180,8 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
             // 检查当前行号是否到达需要检查的分界线，若到达，检查Map，并将checkLine后移
             if (lineNumber > checkLine) {
-                checkMap(lineNumber);
-                checkMapParallel(lineNumber);
+                scanMap(lineNumber, false);
+                //checkMapParallel(lineNumber);
 
                 checkLine += CHECK_TRACE_MAP_INTERVAL;
             }
@@ -197,7 +203,12 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             }
         }
 
+        // 在所有数据读取结束后，进行最后一次检查
+        scanMap(lineNumber, true);
+
         logger.info("共有 {} 行数据出错", wrongLineNumber);
+        logger.info("共有 {} 条Trace出错", traceIdSet.size());
+        logger.info("共上报 {} 条错误Trace", totalErrSum);
         logger.info("拉取数据源完毕，耗时 {} ms......", System.currentTimeMillis() - startTime);
         logger.info("共拉到 {} 行数据，每行数据平均大小 {} 字节", lineNumber, sumbytes / lineNumber);
 
@@ -233,7 +244,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         String tags = data[8];
 
         // 统计trace数量(only for test)
-        tmpMap.computeIfPresent(traceId, (key, value) -> value+1);
+        tmpMap.computeIfPresent(traceId, (key, value) -> value + 1);
         tmpMap.putIfAbsent(traceId, 0);
 
         // 是否为错误行
@@ -275,17 +286,19 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
      * @description 对于错误行的处理
      */
     private void handleWrongLine(String traceId, String lineData, Integer lineNumber) {
+        // 用于记录错误 trace 数量
+        this.traceIdSet.add(traceId);
         // 对于错误行，先将map中对应的traceId对应的trace设置为问题trace
         TRACE_MAP.compute(traceId, (id, trace) -> {
             trace.setAsErrorTrace();
-            return null;
+            return trace;
         });
     }
 
     private void updateMapAfterAnalyzeLine(String traceId, String lineData, Integer lineNumber) {
         // 更新数据
         if (TRACE_MAP.containsKey(traceId)) {
-            TRACE_MAP.compute(traceId, (id, trace) -> {
+            TRACE_MAP.computeIfPresent(traceId, (id, trace) -> {
                 trace.addNewSpan(lineData, lineNumber);
                 return trace;
             });
@@ -297,17 +310,18 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     }
 
     /**
-     * @description 检查map
      * @param lineNumber 当前行号
+     * @param isFin      是否是最后一次扫描
      */
-    private void checkMap(Integer lineNumber) {
+    private void scanMap(Integer lineNumber, Boolean isFin) {
+        long startTime = System.currentTimeMillis();
+        int size = TRACE_MAP.size();
         Iterator<Map.Entry<String, Trace>> it = TRACE_MAP.entrySet().iterator();
         Map.Entry<String, Trace> entry;
 
-        Integer sendFrameTimes = 0;
-        Integer sendErrorTime = 0;
-        Integer sendTrueTime = 0;
-        boolean flag = true;
+        int sendFrameTimes = 0;
+        int sendErrorTimes = 0;
+        int sendTrueTimes = 0;
 
         while (it.hasNext()) {
             entry = it.next();
@@ -315,43 +329,42 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
             // 10w 作为一个threshold；对于那些本地没有问题的trace，
             // 而其他过滤容器又没有这条traceId的信息，删除。
-            if (lineNumber - trace.getLastOccurrenceLine() > REMOVE_ANYWAY_THRESHOLD) {
+            if (lineNumber - trace.getLastOccurrenceLine() >= REMOVE_ANYWAY_THRESHOLD) {
                 TRACE_MAP.remove(trace.getTraceId());
             }
 
             // 如果当前行和这条链路出现的最后一条链路行号相差 2w 以上，上报数据中心检查，
-            if (lineNumber - trace.getLastOccurrenceLine() > CHECK_TRACE_MAP_INTERVAL) {
+            if (isFin || lineNumber - trace.getLastOccurrenceLine() >= CHECK_TRACE_MAP_INTERVAL) {
 
                 sendFrameTimes += 1;
                 // report to data central
 
-                if (!trace.isNormalTrace()) {
+                if (trace.isNormalTrace()) {
+                    sendTrueTimes += 1;
+                    // 对于在本条数据流中无误的链路，向数据汇总容器上报一次pending请求
+                    wsclient.sendTextFrame("{\n" +
+                            "  \"traceId\": " + trace.getTraceId() + ",\n" +
+                            "  \"type\": \"pending\",\n" +
+                            "  \"curLine\": " + lineNumber + "\n" +
+                            "}");
+                } else {
                     // 如果是一条有问题的链路，那么就直接发把当前本地所有数据上报即可；
                     // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
                     wsclient.sendTextFrame(JSON.toJSONString(trace));
                     // 删除Map中的键值，释放内存
                     TRACE_MAP.remove(trace.getTraceId());
-                    sendErrorTime += 1;
-                } else {
-                    sendTrueTime += 1;
-                    // 对于在本条数据流中无误的链路，向数据汇总容器上报一次pending请求
-                    wsclient.sendTextFrame("{\n" +
-                            "  \"traceId\": "+ trace.getTraceId() +",\n" +
-                            "  \"type\": \"pending\",\n" +
-                            "  \"curLine\": "+ lineNumber + "\n" +
-                            "}");
+                    sendErrorTimes += 1;
+                    totalErrSum += 1;
                 }
             }
         }
 
-        if (flag) {
-            logger.info("一次map检查中需要发送 {} 次 WebSocketTextFrame。其中 {} 次错误消息， {} 次正确消息", sendFrameTimes, sendErrorTime, sendTrueTime);
-            flag = false;
-        }
-
+        scanNum.addAndGet(1);
+        // 统计得到大致需要发送 正确数据 5000 次，这里需要使用buffer优化，将正确数据信息每 100（test）为一组发送。错误数据直接发送
+        logger.info("第 {} 次扫描结束Trace_Map, 共扫描 {} 个对象, 共发送 {} 次frame，其中 {} 次为错误，{} 次为正确，共耗时 {} 毫秒。", scanNum.get(), size, sendFrameTimes, sendErrorTimes, sendTrueTimes, System.currentTimeMillis() - startTime);
     }
 
-    private void checkMapParallel(Integer lineNumber) {
+    private void scanMapParallely(Integer lineNumber) {
         SINGLE_TRHEAD.execute(() -> {
 
         });

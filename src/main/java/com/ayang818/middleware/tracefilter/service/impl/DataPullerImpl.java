@@ -38,7 +38,7 @@ public class DataPullerImpl implements DataPuller {
         String dataSourceUrl = "http://localhost:" + port + "/trace" + dataId + ".data";
         CloseableHttpClient client = HttpClients.createDefault();
         try {
-            logger.info("开始连接数据源......");
+            logger.info("开始连接数据源 {}......", dataSourceUrl);
             HttpResponse response = client.execute(new HttpGet(dataSourceUrl));
             dataStreamHandler.handleDataStream(response.getEntity().getContent());
         } catch (IOException e) {
