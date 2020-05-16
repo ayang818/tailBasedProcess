@@ -6,6 +6,7 @@ import com.ayang818.middleware.tracefilter.io.DataStreamHandler;
 import com.ayang818.middleware.tracefilter.pojo.dto.Trace;
 import com.ayang818.middleware.tracefilter.utils.SplitterUtil;
 import com.ayang818.middleware.tracefilter.utils.WsClient;
+import io.netty.channel.ChannelFuture;
 import org.asynchttpclient.ws.WebSocket;
 import org.asynchttpclient.ws.WebSocketListener;
 import org.asynchttpclient.ws.WebSocketUpgradeHandler;
@@ -68,6 +69,10 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
     private static WebSocket wsclient = null;
 
+    private static final Integer REMOVE_ANYWAY_THRESHOLD = 100000;
+
+    private static final Integer CHECK_TRACE_MAP_INTERVAL = 20000;
+
     public static final WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
             .addWebSocketListener(new WebSocketListener() {
                 @Override
@@ -83,6 +88,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                     // if resType == error, report the corresponding entry to the data merge central
                     JSONObject res = JSON.parseObject(payload);
                     String resType = (String) res.get("resType");
+
                     if (Objects.equals(resType, "fin")) {
                         String traceId = (String) res.get("traceId");
                         TRACE_MAP.remove(traceId);
@@ -102,11 +108,13 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                 @Override
                 public void onClose(WebSocket websocket, int code, String reason) {
                     // WebSocket connection closed
+                    logger.info("websocket 连接已断开......");
                 }
 
                 @Override
                 public void onError(Throwable t) {
                     // WebSocket connection error
+                    logger.error("websocket 连接发生错误，堆栈信息如下......");
                     t.printStackTrace();
                 }
 
@@ -164,9 +172,12 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             String tmpstr = new String(bytes, 0, bytesLen);
             char[] chars = tmpstr.toCharArray();
 
+            // 检查当前行号是否到达需要检查的分界线，若到达，检查Map，并将checkLine后移
             if (lineNumber > checkLine) {
                 checkMap(lineNumber);
                 checkMapParallel(lineNumber);
+
+                checkLine += CHECK_TRACE_MAP_INTERVAL;
             }
 
             for (int i = 0; i < chars.length; i++) {
@@ -200,7 +211,6 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         }
         logger.info("共有 {} 条trace", tmpMap.size());
         logger.info("trace中span最多为 {} 条，span最少为 {} 条，平均为 {} 条", maxTraceSpanNum, minTraceSpanNum, spanSum / tmpMap.size());
-
 
     }
 
@@ -252,10 +262,6 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         updateMapAfterAnalyzeLine(traceId, lineData, lineNumber);
 
         if (isWrong) {
-            //System.out.printf("发现错误数据 %s, 行号 %d\n", line, lineNumber);
-
-            // TODO : 发现错误数据之后的处理 ：1. 上报数据中心。
-            // 这里由于已经知道了行号和数据了，这里可以尝试使用线程池来加速，防止IO阻塞时间过长导致效率下降
             handleWrongLine(traceId, lineData, lineNumber);
             return true;
         }
@@ -292,33 +298,57 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
     /**
      * @description 检查map
-     * @param lineNumber 行号
+     * @param lineNumber 当前行号
      */
     private void checkMap(Integer lineNumber) {
         Iterator<Map.Entry<String, Trace>> it = TRACE_MAP.entrySet().iterator();
         Map.Entry<String, Trace> entry;
+
+        Integer sendFrameTimes = 0;
+        Integer sendErrorTime = 0;
+        Integer sendTrueTime = 0;
+        boolean flag = true;
+
         while (it.hasNext()) {
             entry = it.next();
             Trace trace = entry.getValue();
+
+            // 10w 作为一个threshold；对于那些本地没有问题的trace，
+            // 而其他过滤容器又没有这条traceId的信息，删除。
+            if (lineNumber - trace.getLastOccurrenceLine() > REMOVE_ANYWAY_THRESHOLD) {
+                TRACE_MAP.remove(trace.getTraceId());
+            }
+
             // 如果当前行和这条链路出现的最后一条链路行号相差 2w 以上，上报数据中心检查，
-            if (lineNumber - trace.getLastOccurrenceLine() > 20000) {
+            if (lineNumber - trace.getLastOccurrenceLine() > CHECK_TRACE_MAP_INTERVAL) {
+
+                sendFrameTimes += 1;
                 // report to data central
 
                 if (!trace.isNormalTrace()) {
-                    // 如果是一条有问题的链路，那么就直接发把内容发过去
+                    // 如果是一条有问题的链路，那么就直接发把当前本地所有数据上报即可；
+                    // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
                     wsclient.sendTextFrame(JSON.toJSONString(trace));
                     // 删除Map中的键值，释放内存
                     TRACE_MAP.remove(trace.getTraceId());
+                    sendErrorTime += 1;
                 } else {
-                    // 对于在本条数据流中无误的链路，向数据汇总容器发送一次pending请求
+                    sendTrueTime += 1;
+                    // 对于在本条数据流中无误的链路，向数据汇总容器上报一次pending请求
                     wsclient.sendTextFrame("{\n" +
                             "  \"traceId\": "+ trace.getTraceId() +",\n" +
-                            "  \"type\": \"pending\"\n" +
+                            "  \"type\": \"pending\",\n" +
+                            "  \"curLine\": "+ lineNumber + "\n" +
                             "}");
                 }
-
             }
         }
+
+        if (flag) {
+            logger.info("一次map检查中需要发送 {} 次 WebSocketTextFrame。其中 {} 次错误消息， {} 次正确消息", sendFrameTimes, sendErrorTime, sendTrueTime);
+            flag = false;
+        }
+
     }
 
     private void checkMapParallel(Integer lineNumber) {
