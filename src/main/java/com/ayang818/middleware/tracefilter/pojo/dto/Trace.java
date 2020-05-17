@@ -30,7 +30,7 @@ public class Trace {
     /**
      * 这条trace中的每条span
      */
-    private List<String> spans;
+    private List<Span> spans;
 
     public Trace(String traceId) {
         this.traceId = traceId;
@@ -44,10 +44,11 @@ public class Trace {
      * @description 添加新的span
      * @param lineData 一行数据
      * @param lineNumber 行号
+     * @param startTime
      */
-    public void addNewSpan(String lineData, Integer lineNumber) {
+    public void addNewSpan(String lineData, Integer lineNumber, String startTime) {
         this.lastOccurrenceLine = lineNumber;
-        this.spans.add(lineData);
+        this.spans.add(new Span(Long.valueOf(startTime), lineData));
     }
 
     /**
@@ -67,5 +68,41 @@ public class Trace {
 
     public boolean isNormalTrace() {
         return this.isNormalTrace;
+    }
+
+    public List<Span> getSpans() {
+        return this.spans;
+    }
+}
+
+
+class Span {
+    private Long startTime;
+    private String data;
+
+    public Span(Long startTime, String lineData) {
+        this.startTime = startTime;
+        this.data = lineData;
+    }
+
+    public Long getStartTime() {
+        return startTime;
+    }
+
+    public void setStartTime(Long startTime) {
+        this.startTime = startTime;
+    }
+
+    public String getData() {
+        return data;
+    }
+
+    public void setData(String data) {
+        this.data = data;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("{\"startTime\": %d, \"data\": \"%s\"}", this.startTime, this.data);
     }
 }

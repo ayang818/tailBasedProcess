@@ -73,7 +73,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
     private static final Integer CHECK_TRACE_MAP_INTERVAL = 20000;
 
-    private static Integer totalErrSum = 0;
+    private static AtomicInteger totalErrSum = new AtomicInteger(0);
 
     private static AtomicInteger scanNum = new AtomicInteger(0);
 
@@ -181,7 +181,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             // 检查当前行号是否到达需要检查的分界线，若到达，检查Map，并将checkLine后移
             if (lineNumber > checkLine) {
                 scanMap(lineNumber, false);
-                //checkMapParallel(lineNumber);
+                //scanMapParallely(lineNumber, false);
 
                 checkLine += CHECK_TRACE_MAP_INTERVAL;
             }
@@ -204,11 +204,12 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         }
 
         // 在所有数据读取结束后，进行最后一次检查
+        //scanMapParallely(lineNumber, true);
         scanMap(lineNumber, true);
 
         logger.info("共有 {} 行数据出错", wrongLineNumber);
         logger.info("共有 {} 条Trace出错", traceIdSet.size());
-        logger.info("共上报 {} 条错误Trace", totalErrSum);
+        logger.info("共上报 {} 条错误Trace", totalErrSum.get());
         logger.info("拉取数据源完毕，耗时 {} ms......", System.currentTimeMillis() - startTime);
         logger.info("共拉到 {} 行数据，每行数据平均大小 {} 字节", lineNumber, sumbytes / lineNumber);
 
@@ -241,6 +242,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         }
 
         String traceId = data[0];
+        String startTime = data[1];
         String tags = data[8];
 
         // 统计trace数量(only for test)
@@ -270,7 +272,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         }
 
         // 更新map
-        updateMapAfterAnalyzeLine(traceId, lineData, lineNumber);
+        updateMapAfterAnalyzeLine(traceId, lineData, lineNumber, startTime);
 
         if (isWrong) {
             handleWrongLine(traceId, lineData, lineNumber);
@@ -295,16 +297,16 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         });
     }
 
-    private void updateMapAfterAnalyzeLine(String traceId, String lineData, Integer lineNumber) {
+    private void updateMapAfterAnalyzeLine(String traceId, String lineData, Integer lineNumber, String startTime) {
         // 更新数据
         if (TRACE_MAP.containsKey(traceId)) {
             TRACE_MAP.computeIfPresent(traceId, (id, trace) -> {
-                trace.addNewSpan(lineData, lineNumber);
+                trace.addNewSpan(lineData, lineNumber, startTime);
                 return trace;
             });
         } else {
             Trace trace = new Trace(traceId);
-            trace.addNewSpan(lineData, lineNumber);
+            trace.addNewSpan(lineData, lineNumber, startTime);
             TRACE_MAP.put(traceId, trace);
         }
     }
@@ -339,22 +341,23 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                 sendFrameTimes += 1;
                 // report to data central
 
+                final int pendingType = 1;
+                final int errorType = 0;
+
                 if (trace.isNormalTrace()) {
                     sendTrueTimes += 1;
+                    String msg = String.format("{\"traceId\": \"%s\", \"type\": %d, \"curLine\": %d}", trace.getTraceId(), pendingType, lineNumber);
                     // 对于在本条数据流中无误的链路，向数据汇总容器上报一次pending请求
-                    wsclient.sendTextFrame("{\n" +
-                            "  \"traceId\": " + trace.getTraceId() + ",\n" +
-                            "  \"type\": \"pending\",\n" +
-                            "  \"curLine\": " + lineNumber + "\n" +
-                            "}");
+                    wsclient.sendTextFrame(msg);
                 } else {
                     // 如果是一条有问题的链路，那么就直接发把当前本地所有数据上报即可；
                     // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
-                    wsclient.sendTextFrame(JSON.toJSONString(trace));
+                    String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": \"%s\", \"type\": %d}", trace.getTraceId(), lineNumber, trace.getSpans().toString(), errorType);
+                    wsclient.sendTextFrame(msg);
                     // 删除Map中的键值，释放内存
                     TRACE_MAP.remove(trace.getTraceId());
                     sendErrorTimes += 1;
-                    totalErrSum += 1;
+                    totalErrSum.getAndAdd(1);
                 }
             }
         }
@@ -364,9 +367,9 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         logger.info("第 {} 次扫描结束Trace_Map, 共扫描 {} 个对象, 共发送 {} 次frame，其中 {} 次为错误，{} 次为正确，共耗时 {} 毫秒。", scanNum.get(), size, sendFrameTimes, sendErrorTimes, sendTrueTimes, System.currentTimeMillis() - startTime);
     }
 
-    private void scanMapParallely(Integer lineNumber) {
+    private void scanMapParallely(Integer lineNumber, Boolean isFin) {
         SINGLE_TRHEAD.execute(() -> {
-
+            scanMap(lineNumber, isFin);
         });
     }
 
