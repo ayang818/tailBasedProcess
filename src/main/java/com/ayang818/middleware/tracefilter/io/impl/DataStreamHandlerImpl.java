@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import static com.ayang818.middleware.tracefilter.consts.Setting.*;
 
 /**
  * @author 杨丰畅
@@ -36,33 +37,9 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     private static final Logger logger = LoggerFactory.getLogger(DataStreamHandlerImpl.class);
 
     /**
-     * 默认读缓冲区大小，由于系统默认的用户地址空间文件缓冲区大小4096字节，所以这里取4096的倍数4MB
-     */
-    private final Integer defaultReadBufferSize = 1024 * 1024 * 4;
-
-    /**
      * 换行标识符
      */
     private static final char NEXT_LINE_FLAG = '\n';
-
-    /**
-     * 大部分单条数据长度（byte）
-     */
-    private static final Integer NORMAL_PER_LINE_SIZE = 270;
-
-    private static final String STATUS_CODE = "http.status_code";
-
-    private static final String PASS_STATUS_CODE = "200";
-
-    private static final String ERROR = "error";
-
-    private static final String BAN_ERROR_CODE = "1";
-
-    private static final int ERROR_TYPE = 0;
-
-    private static final int PENDING_TYPE = 1;
-
-    private static final int FIN_TYPE = 2;
 
     private static final ConcurrentHashMap<String, Trace> TRACE_MAP =
             new ConcurrentHashMap<>(8192);
@@ -73,17 +50,13 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
     private static WebSocket wsclient = null;
 
-    private static boolean stdoutFlag = true;
-
-    private static final Integer REMOVE_ANYWAY_THRESHOLD = 100000;
-
-    private static final Integer CHECK_TRACE_MAP_INTERVAL = 20000;
-
     private static AtomicInteger totalErrSum = new AtomicInteger(0);
 
     private static AtomicInteger scanNum = new AtomicInteger(0);
 
     private Set<String> traceIdSet = new ConcurrentSkipListSet<>();
+
+    private static final List<String> PENDING_FRAME_BUFFER = new ArrayList<>(PENDING_BUFFER_SIZE);
 
     public static final WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
             .addWebSocketListener(new WebSocketListener() {
@@ -103,13 +76,12 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
                     if (Objects.equals(resType, "fin")) {
                         String traceId = res.getObject("traceId", String.class);
-
-                        //TRACE_MAP.remove(traceId);
+                        TRACE_MAP.remove(traceId);
                     } else if (Objects.equals(resType, "error")) {
                         String traceId = res.getObject("traceId", String.class);
                         Trace trace = TRACE_MAP.get(traceId);
                         if (trace != null) {
-                            String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), -1, trace.getSpans().toString(), ERROR_TYPE);
+                            String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine(), trace.getSpans().toString(), ERROR_TYPE);
 
                             wsclient.sendTextFrame(msg);
 
@@ -118,7 +90,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                             logger.warn("traceId不存在本链路中");
                         }
                     } else {
-                        logger.warn("异常数据! {}", payload);
+                        logger.warn("接收到异常数据! {}", payload);
                     }
                 }
 
@@ -194,7 +166,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                 scanMap(lineNumber, false);
                 //scanMapParallely(lineNumber, false);
 
-                checkLine += CHECK_TRACE_MAP_INTERVAL;
+                checkLine += SCAN_TRACE_MAP_INTERVAL;
             }
 
             for (int i = 0; i < chars.length; i++) {
@@ -336,10 +308,6 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         int sendErrorTimes = 0;
         int sendTrueTimes = 0;
 
-        // 由于发送 pending 请求过于频繁，所以需要设置缓冲区
-        int pendingBufferSize = 200;
-        List<String> pendingFrameBuffer = new ArrayList<>(pendingBufferSize);
-
         while (it.hasNext()) {
             entry = it.next();
             Trace trace = entry.getValue();
@@ -351,19 +319,17 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             }
 
             // 如果当前行和这条链路出现的最后一条链路行号相差 2w 以上，上报数据中心检查，
-            if (isFin || lineNumber - trace.getLastOccurrenceLine() >= CHECK_TRACE_MAP_INTERVAL) {
-
-                // report to data central
+            if (isFin || lineNumber - trace.getLastOccurrenceLine() >= SCAN_TRACE_MAP_INTERVAL) {
 
                 if (trace.isNormalTrace()) {
-                    // TODO 设置缓冲区，每 n 条统一发送
-                    if (pendingFrameBuffer.size() <= pendingBufferSize) {
-                        pendingFrameBuffer.add(String.format("{\"traceId\": \"%s\"}", trace.getTraceId()));
+                    if (PENDING_FRAME_BUFFER.size() <= PENDING_BUFFER_SIZE) {
+                        PENDING_FRAME_BUFFER.add(String.format("{\"traceId\": \"%s\", \"curLine\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine()));
                     } else {
-                        // send and clear buffer
-                        String msg = String.format("{\"curLine\": %d, \"type\": %d,\"data\": %s}", lineNumber, PENDING_TYPE, pendingFrameBuffer.toString());
+                        // 发送消息，清空缓冲区
+                        String msg = String.format("{\"type\": %d,\"data\": %s}", PENDING_TYPE, PENDING_FRAME_BUFFER.toString());
                         wsclient.sendTextFrame(msg);
-                        pendingFrameBuffer.clear();
+                        PENDING_FRAME_BUFFER.clear();
+
                         sendTrueTimes += 1;
                         sendFrameTimes += 1;
                     }
@@ -371,15 +337,20 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                 } else {
                     // 如果是一条有问题的链路，那么就直接发把当前本地所有数据上报即可；
                     // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
-                    String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), lineNumber, trace.getSpans().toString(), ERROR_TYPE);
+                    trace.getSpans().sort((span1, span2) ->  span1.getStartTime() - span2.getStartTime() > 0 ? 1 : 0);
+                    String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine(), trace.getSpans().toString(), ERROR_TYPE);
                     wsclient.sendTextFrame(msg);
+
                     // 删除Map中的键值，释放内存
                     TRACE_MAP.remove(trace.getTraceId());
+
                     sendErrorTimes += 1;
                     sendFrameTimes += 1;
+
                     // 用于确保在本条链路一定错误的上报率为 100%
                     totalErrSum.getAndAdd(1);
                 }
+
             }
         }
 
@@ -390,7 +361,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         }
 
         scanNum.addAndGet(1);
-        // 统计得到大致需要发送 正确数据 5000 次，这里需要使用buffer优化，将正确数据信息每 100（test）为一组发送。错误数据直接发送
+
         logger.info("第 {} 次扫描结束Trace_Map, 共扫描 {} 个对象, 共发送 {} 次frame，其中 {} 次为错误，{} 次为正确，共耗时 {} 毫秒。", scanNum.get(), size, sendFrameTimes, sendErrorTimes, sendTrueTimes, System.currentTimeMillis() - startTime);
     }
 

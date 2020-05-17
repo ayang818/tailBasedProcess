@@ -73,36 +73,35 @@ public class Trace {
     public List<Span> getSpans() {
         return this.spans;
     }
-}
 
+    public static class Span {
+        private Long startTime;
+        private String data;
 
-class Span {
-    private Long startTime;
-    private String data;
+        public Span(Long startTime, String lineData) {
+            this.startTime = startTime;
+            this.data = lineData;
+        }
 
-    public Span(Long startTime, String lineData) {
-        this.startTime = startTime;
-        this.data = lineData;
-    }
+        public Long getStartTime() {
+            return startTime;
+        }
 
-    public Long getStartTime() {
-        return startTime;
-    }
+        public void setStartTime(Long startTime) {
+            this.startTime = startTime;
+        }
 
-    public void setStartTime(Long startTime) {
-        this.startTime = startTime;
-    }
+        public String getData() {
+            return data;
+        }
 
-    public String getData() {
-        return data;
-    }
+        public void setData(String data) {
+            this.data = data;
+        }
 
-    public void setData(String data) {
-        this.data = data;
-    }
-
-    @Override
-    public String toString() {
-        return String.format("{\"startTime\": %d, \"data\": \"%s\"}", this.startTime, this.data);
+        @Override
+        public String toString() {
+            return String.format("{\"startTime\": %d, \"data\": \"%s\"}", this.startTime, this.data);
+        }
     }
 }
