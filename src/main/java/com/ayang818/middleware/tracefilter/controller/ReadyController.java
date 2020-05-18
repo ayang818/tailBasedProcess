@@ -1,14 +1,13 @@
 package com.ayang818.middleware.tracefilter.controller;
 
-import com.ayang818.middleware.tracefilter.pojo.PortParamter;
 import com.ayang818.middleware.tracefilter.service.DataPuller;
 import com.ayang818.middleware.tracefilter.utils.CastUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletResponse;
@@ -18,7 +17,6 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Arrays;
 
 /**
  * @author 杨丰畅
@@ -39,12 +37,10 @@ public class ReadyController {
         return "";
     }
 
-    @RequestMapping(value = "setParamter", method = RequestMethod.POST)
-    public String setParamter(@RequestBody PortParamter port, HttpServletResponse response) {
-        String dataport = null;
-        if (port != null) {
-            dataport = port.getDataport();
-            logger.info("获取到端口参数 {}", dataport);
+    @RequestMapping(value = "setParamter", method = RequestMethod.GET)
+    public String setParamter(@RequestParam String dataport, HttpServletResponse response) {
+        if (dataport != null) {
+            logger.info("数据过滤容器获取到端口参数 {}", dataport);
             // 开始从数据流中拉取数据
             dataPuller.pulldata(dataport);
         } else {

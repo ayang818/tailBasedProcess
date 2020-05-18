@@ -9,7 +9,6 @@ import org.apache.http.impl.client.HttpClients;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -24,18 +23,21 @@ public class DataPullerImpl implements DataPuller {
 
     private static final Logger logger = LoggerFactory.getLogger(DataPuller.class);
 
-    @Value("${env.dataId}")
-    String dataId;
-
     @Autowired
     DataStreamHandler dataStreamHandler;
 
     @Override
     public void pulldata(String dataport) {
-        assert dataId == null : "应用数据源没有正确设置";
-        Integer port = Integer.valueOf(dataport);
+        String serverPort = System.getProperty("SERVER_PORT", "8000");
+        String dataSourceUrl;
         // 根据环境变量中的容器编号，拉取不同源头的数据，数据URL ：http://localhost:port/trace${imageNumber}.data
-        String dataSourceUrl = "http://localhost:" + port + "/trace" + dataId + ".data";
+        if ("8000".equals(serverPort)) {
+            logger.info("准备拉取 trace1.data......");
+            dataSourceUrl = "http://localhost:" + dataport + "/trace1.data";
+        } else {
+            logger.info("准备拉取 trace2.data......");
+            dataSourceUrl = "http://localhost:" + dataport + "/trace2.data";
+        }
         CloseableHttpClient client = HttpClients.createDefault();
         try {
             logger.info("开始连接数据源 {}......", dataSourceUrl);

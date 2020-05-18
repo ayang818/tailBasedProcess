@@ -26,7 +26,7 @@ public class WsClient {
         if (webSocketClient == null) {
             synchronized (WsClient.class) {
                 if (webSocketClient == null) {
-                        // 数据中心http端口为8002，ws端口为8003
+                        // 数据后端http端口为8002，ws端口为8003
                     try {
                         webSocketClient = Dsl.asyncHttpClient()
                                 .prepareGet("ws://localhost:8003/handle")

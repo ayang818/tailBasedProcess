@@ -235,23 +235,8 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         // 是否为错误行
         boolean isWrong = false;
 
-        // 遍历所有 tag，查看这条span是否符合过滤要求
-        String[] eachTag = SplitterUtil.baseSplit(tags, "&");
-
-        for (int i = 0; i < eachTag.length; i++) {
-            String[] kvArray = SplitterUtil.baseSplit(eachTag[i], "=");
-            if (kvArray != null && kvArray.length == 2) {
-                String key = kvArray[0];
-                String val = kvArray[1];
-                boolean satisfyStatusCode =
-                        STATUS_CODE.equals(key) && !PASS_STATUS_CODE.equals(val);
-                boolean satisfyError = ERROR.equals(key) && BAN_ERROR_CODE.equals(val);
-                // 过滤条件 : http.status_code!=200 || error=1
-                if (satisfyStatusCode || satisfyError) {
-                    isWrong = true;
-                    break;
-                }
-            }
+        if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
+            isWrong = true;
         }
 
         // 更新map
@@ -308,9 +293,11 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         int sendErrorTimes = 0;
         int sendTrueTimes = 0;
 
+        Trace trace;
+
         while (it.hasNext()) {
             entry = it.next();
-            Trace trace = entry.getValue();
+            trace = entry.getValue();
 
             // 10w 作为一个threshold；对于那些本地没有问题的trace，
             // 而其他过滤容器又没有这条traceId的信息，删除。
@@ -318,14 +305,14 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                 TRACE_MAP.remove(trace.getTraceId());
             }
 
-            // 如果当前行和这条链路出现的最后一条链路行号相差 2w 以上，上报数据中心检查，
+            // 如果当前行和这条链路出现的最后一条链路行号相差 2w 以上，上报数据后端检查，
             if (isFin || lineNumber - trace.getLastOccurrenceLine() >= SCAN_TRACE_MAP_INTERVAL) {
 
                 if (trace.isNormalTrace()) {
                     if (PENDING_FRAME_BUFFER.size() <= PENDING_BUFFER_SIZE) {
                         PENDING_FRAME_BUFFER.add(String.format("{\"traceId\": \"%s\", \"curLine\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine()));
                     } else {
-                        // 发送消息，清空缓冲区
+                        // 发送消息，清空 pending 数据缓冲区
                         String msg = String.format("{\"type\": %d,\"data\": %s}", PENDING_TYPE, PENDING_FRAME_BUFFER.toString());
                         wsclient.sendTextFrame(msg);
                         PENDING_FRAME_BUFFER.clear();
@@ -337,7 +324,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                 } else {
                     // 如果是一条有问题的链路，那么就直接发把当前本地所有数据上报即可；
                     // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
-                    trace.getSpans().sort((span1, span2) ->  span1.getStartTime() - span2.getStartTime() > 0 ? 1 : 0);
+                    trace.getSpans().sort((span1, span2) -> span1.getStartTime() - span2.getStartTime() > 0 ? 1 : 0);
                     String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine(), trace.getSpans().toString(), ERROR_TYPE);
                     wsclient.sendTextFrame(msg);
 
@@ -354,7 +341,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             }
         }
 
-        // 最后一次扫描完后，向数据中心发送 FIN 消息，告知数据已经过滤发送完毕，可以进行下一步处理了
+        // 最后一次扫描完后，向数据后端发送 FIN 消息，告知数据已经过滤发送完毕，可以进行下一步处理了
         if (isFin) {
             String msg = String.format("{\"type\": %d}", FIN_TYPE);
             wsclient.sendTextFrame(msg);
