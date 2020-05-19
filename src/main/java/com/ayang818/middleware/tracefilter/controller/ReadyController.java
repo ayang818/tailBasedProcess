@@ -31,13 +31,12 @@ public class ReadyController {
 
     private static final Logger logger = LoggerFactory.getLogger(ReadyController.class);
 
-    @RequestMapping(value = "ready", method = RequestMethod.HEAD)
+    @RequestMapping(value = "ready")
     public String ready(HttpServletResponse response) {
-        response.setHeader("status", "200");
-        return "";
+        return "suc";
     }
 
-    @RequestMapping(value = "setParamter", method = RequestMethod.GET)
+    @RequestMapping(value = "setParamter")
     public String setParamter(@RequestParam String dataport, HttpServletResponse response) {
         if (dataport != null) {
             logger.info("数据过滤容器获取到端口参数 {}", dataport);
@@ -47,7 +46,7 @@ public class ReadyController {
             logger.warn("未接收到数据源端口");
         }
         response.setHeader("status", "200");
-        return "";
+        return "suc";
     }
 
     @RequestMapping(value = "/trace1.data", method = RequestMethod.GET)

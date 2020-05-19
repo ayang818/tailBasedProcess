@@ -12,7 +12,12 @@ public class TraceFliterApplication {
 
     public static void main(String[] args) {
         String envPort = System.getenv("SERVER_PORT");
-        String port = envPort == null ? "8000" : envPort;
+        String port = null;
+        if (envPort == null) {
+            port = System.getProperty("server.port");
+        } else {
+            port = envPort;
+        }
         logger.info("数据过滤应用启动在 {} 端口", port);
         SpringApplication.run(TraceFliterApplication.class, "--server.port=" + port);
     }

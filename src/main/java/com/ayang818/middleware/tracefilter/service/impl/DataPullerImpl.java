@@ -28,15 +28,18 @@ public class DataPullerImpl implements DataPuller {
 
     @Override
     public void pulldata(String dataport) {
-        String serverPort = System.getProperty("SERVER_PORT", "8000");
+        String serverPort = System.getProperty("server.port");
+
         String dataSourceUrl;
         // 根据环境变量中的容器编号，拉取不同源头的数据，数据URL ：http://localhost:port/trace${imageNumber}.data
         if ("8000".equals(serverPort)) {
             logger.info("准备拉取 trace1.data......");
-            dataSourceUrl = "http://localhost:" + dataport + "/trace1.data";
+            //dataSourceUrl = "http://localhost:" + dataport + "/trace1.data";
+            dataSourceUrl = "http://localhost:8000/trace1.data";
         } else {
             logger.info("准备拉取 trace2.data......");
-            dataSourceUrl = "http://localhost:" + dataport + "/trace2.data";
+            //dataSourceUrl = "http://localhost:" + dataport + "/trace2.data";
+            dataSourceUrl = "http://localhost:8001/trace2.data";
         }
         CloseableHttpClient client = HttpClients.createDefault();
         try {

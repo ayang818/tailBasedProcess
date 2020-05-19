@@ -56,4 +56,6 @@ public class Setting {
      *  【websocket frame信息标识】 ： 表示所有数据均已经发送完
      */
     public static final int FIN_TYPE = 2;
+
+    public static final String PULL_ERR_MSG = "{\"type\": 1}";
 }

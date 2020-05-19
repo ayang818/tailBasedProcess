@@ -2,10 +2,12 @@ package com.ayang818.middleware.tracefilter.io.impl;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.TypeReference;
 import com.ayang818.middleware.tracefilter.io.DataStreamHandler;
 import com.ayang818.middleware.tracefilter.pojo.dto.Trace;
 import com.ayang818.middleware.tracefilter.utils.SplitterUtil;
 import com.ayang818.middleware.tracefilter.utils.WsClient;
+import com.google.common.collect.Sets;
 import org.asynchttpclient.ws.WebSocket;
 import org.asynchttpclient.ws.WebSocketListener;
 import org.asynchttpclient.ws.WebSocketUpgradeHandler;
@@ -20,7 +22,6 @@ import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,11 +37,6 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(DataStreamHandlerImpl.class);
 
-    /**
-     * 换行标识符
-     */
-    private static final char NEXT_LINE_FLAG = '\n';
-
     private static final ConcurrentHashMap<String, Trace> TRACE_MAP =
             new ConcurrentHashMap<>(8192);
 
@@ -54,7 +50,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
     private static AtomicInteger scanNum = new AtomicInteger(0);
 
-    private Set<String> traceIdSet = new ConcurrentSkipListSet<>();
+    private static Set<String> errTraceIdSet = Sets.newConcurrentHashSet();
 
     private static final List<String> PENDING_FRAME_BUFFER = new ArrayList<>(PENDING_BUFFER_SIZE);
 
@@ -69,26 +65,28 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                 @Override
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
                     // 在回调中接收 形如 {traceId: xxx, resType: "fin/error"}
-                    // if resType == fin, delete the corresponding entry locally and free memory
+                    // if resType == free, delete the corresponding entry locally and free memory
                     // if resType == error, report the corresponding entry to the data merge central
                     JSONObject res = JSON.parseObject(payload);
                     String resType = (String) res.get("resType");
-
-                    if (Objects.equals(resType, "fin")) {
-                        String traceId = res.getObject("traceId", String.class);
-                        TRACE_MAP.remove(traceId);
-                    } else if (Objects.equals(resType, "error")) {
-                        String traceId = res.getObject("traceId", String.class);
-                        Trace trace = TRACE_MAP.get(traceId);
-                        if (trace != null) {
-                            String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine(), trace.getSpans().toString(), ERROR_TYPE);
-
-                            wsclient.sendTextFrame(msg);
-
-                            TRACE_MAP.remove(trace.getTraceId());
-                        } else {
-                            logger.warn("traceId不存在本链路中");
-                        }
+                    logger.info("收到消息类型为 {}", resType);
+                    if (Objects.equals(resType, "free")) {
+                        // TODO free these true traces
+                        logger.info("开始释放和标记链路......");
+                        // 错误链路
+                        Set<String> recSet = res.getObject("data", new TypeReference<Set<String>>(){});
+                        SINGLE_TRHEAD.execute(() -> {
+                            Set<Map.Entry<String, Trace>> entries = TRACE_MAP.entrySet();
+                            for (Map.Entry<String, Trace> entry : entries) {
+                                if (recSet.contains(entry.getKey())) {
+                                    entry.getValue().setAsErrorTrace();
+                                    errTraceIdSet.add(entry.getKey());
+                                } else {
+                                    //TRACE_MAP.remove(entry.getKey());
+                                }
+                            }
+                        });
+                        logger.info("结束释放和标记链路......");
                     } else {
                         logger.warn("接收到异常数据! {}", payload);
                     }
@@ -170,7 +168,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             }
 
             for (int i = 0; i < chars.length; i++) {
-                if (chars[i] == NEXT_LINE_FLAG) {
+                if (chars[i] == '\n') {
                     // 行号
                     lineNumber += 1;
                     // 得到一行数据
@@ -191,7 +189,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         scanMap(lineNumber, true);
 
         logger.info("共有 {} 行数据出错", wrongLineNumber);
-        logger.info("共有 {} 条Trace出错", traceIdSet.size());
+        logger.info("共有 {} 条Trace出错", errTraceIdSet.size());
         logger.info("共上报 {} 条错误Trace", totalErrSum.get());
         logger.info("拉取数据源完毕，耗时 {} ms......", System.currentTimeMillis() - startTime);
         logger.info("共拉到 {} 行数据，每行数据平均大小 {} 字节", lineNumber, sumbytes / lineNumber);
@@ -257,7 +255,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
      */
     private void handleWrongLine(String traceId, String lineData, Integer lineNumber) {
         // 用于记录错误 trace 数量
-        this.traceIdSet.add(traceId);
+        this.errTraceIdSet.add(traceId);
         // 对于错误行，先将map中对应的traceId对应的trace设置为问题trace
         TRACE_MAP.compute(traceId, (id, trace) -> {
             trace.setAsErrorTrace();
@@ -301,26 +299,28 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
             // 10w 作为一个threshold；对于那些本地没有问题的trace，
             // 而其他过滤容器又没有这条traceId的信息，删除。
-            if (lineNumber - trace.getLastOccurrenceLine() >= REMOVE_ANYWAY_THRESHOLD) {
-                TRACE_MAP.remove(trace.getTraceId());
-            }
+            //if (lineNumber - trace.getLastOccurrenceLine() >= REMOVE_ANYWAY_THRESHOLD) {
+            //    TRACE_MAP.remove(trace.getTraceId());
+            //}
 
             // 如果当前行和这条链路出现的最后一条链路行号相差 2w 以上，上报数据后端检查，
             if (isFin || lineNumber - trace.getLastOccurrenceLine() >= SCAN_TRACE_MAP_INTERVAL) {
 
                 if (trace.isNormalTrace()) {
-                    if (PENDING_FRAME_BUFFER.size() <= PENDING_BUFFER_SIZE) {
-                        PENDING_FRAME_BUFFER.add(String.format("{\"traceId\": \"%s\", \"curLine\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine()));
-                    } else {
-                        // 发送消息，清空 pending 数据缓冲区
-                        String msg = String.format("{\"type\": %d,\"data\": %s}", PENDING_TYPE, PENDING_FRAME_BUFFER.toString());
-                        wsclient.sendTextFrame(msg);
-                        PENDING_FRAME_BUFFER.clear();
+                    //if (PENDING_FRAME_BUFFER.size() <= PENDING_BUFFER_SIZE) {
+                    //    PENDING_FRAME_BUFFER.add(String.format("{\"traceId\": \"%s\", \"curLine\": %d}", trace.getTraceId(), trace.getLastOccurrenceLine()));
+                    //} else {
+                    //    // 发送消息，清空 pending 数据缓冲区
+                    //    String msg = String.format("{\"type\": %d,\"data\": %s}", PENDING_TYPE, PENDING_FRAME_BUFFER.toString());
+                    //    wsclient.sendTextFrame(msg);
+                    //    PENDING_FRAME_BUFFER.clear();
+                    //
+                    //    sendTrueTimes += 1;
+                    //    sendFrameTimes += 1;
+                    //}
+                    //// 对于在本条数据流中无误的链路，向数据汇总容器上报一次pending请求
 
-                        sendTrueTimes += 1;
-                        sendFrameTimes += 1;
-                    }
-                    // 对于在本条数据流中无误的链路，向数据汇总容器上报一次pending请求
+                    // TODO 如果是正常链路咋办呢？不上报？
                 } else {
                     // 如果是一条有问题的链路，那么就直接发把当前本地所有数据上报即可；
                     // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
@@ -347,15 +347,19 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             wsclient.sendTextFrame(msg);
         }
 
+        // 发送拉取所有错误链路的请求
+        wsclient.sendTextFrame(PULL_ERR_MSG);
+
+
         scanNum.addAndGet(1);
 
         logger.info("第 {} 次扫描结束Trace_Map, 共扫描 {} 个对象, 共发送 {} 次frame，其中 {} 次为错误，{} 次为正确，共耗时 {} 毫秒。", scanNum.get(), size, sendFrameTimes, sendErrorTimes, sendTrueTimes, System.currentTimeMillis() - startTime);
     }
 
-    private void scanMapParallely(Integer lineNumber, Boolean isFin) {
-        SINGLE_TRHEAD.execute(() -> {
-            scanMap(lineNumber, isFin);
-        });
-    }
+    //private void scanMapParallely(Integer lineNumber, Boolean isFin) {
+    //    SINGLE_TRHEAD.execute(() -> {
+    //        scanMap(lineNumber, isFin);
+    //    });
+    //}
 
 }
