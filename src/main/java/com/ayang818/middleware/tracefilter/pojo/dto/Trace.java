@@ -20,7 +20,7 @@ public class Trace {
     /**
      * 上一次出现行号
      */
-    private Integer lastOccurrenceLine;
+    private Integer firstOccurrenceLine;
 
     /**
      * 是否为正确链路
@@ -32,9 +32,9 @@ public class Trace {
      */
     private List<Span> spans;
 
-    public Trace(String traceId) {
+    public Trace(String traceId, Integer lineNumber) {
         this.traceId = traceId;
-        this.lastOccurrenceLine = -1;
+        this.firstOccurrenceLine = lineNumber;
         this.isNormalTrace = true;
         // 经过代码统计，一条trace中的平均值为17
         this.spans = new ArrayList<>(20);
@@ -43,11 +43,9 @@ public class Trace {
     /**
      * @description 添加新的span
      * @param lineData 一行数据
-     * @param lineNumber 行号
      * @param startTime
      */
-    public void addNewSpan(String lineData, Integer lineNumber, String startTime) {
-        this.lastOccurrenceLine = lineNumber;
+    public void addNewSpan(String lineData, String startTime) {
         this.spans.add(new Span(Long.valueOf(startTime), lineData));
     }
 
@@ -62,8 +60,8 @@ public class Trace {
         return this.traceId;
     }
 
-    public Integer getLastOccurrenceLine() {
-        return this.lastOccurrenceLine;
+    public Integer getFirstOccurrenceLine() {
+        return this.firstOccurrenceLine;
     }
 
     public boolean isNormalTrace() {
@@ -72,36 +70,5 @@ public class Trace {
 
     public List<Span> getSpans() {
         return this.spans;
-    }
-
-    public static class Span {
-        private Long startTime;
-        private String data;
-
-        public Span(Long startTime, String lineData) {
-            this.startTime = startTime;
-            this.data = lineData;
-        }
-
-        public Long getStartTime() {
-            return startTime;
-        }
-
-        public void setStartTime(Long startTime) {
-            this.startTime = startTime;
-        }
-
-        public String getData() {
-            return data;
-        }
-
-        public void setData(String data) {
-            this.data = data;
-        }
-
-        @Override
-        public String toString() {
-            return String.format("{\"startTime\": %d, \"data\": \"%s\"}", this.startTime, this.data);
-        }
     }
 }

@@ -1,13 +1,12 @@
 package com.ayang818.middleware.tracefilter.utils;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.Dsl;
 import org.asynchttpclient.ws.WebSocket;
-import org.asynchttpclient.ws.WebSocketListener;
 import org.asynchttpclient.ws.WebSocketUpgradeHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import static com.ayang818.middleware.tracefilter.io.impl.DataStreamHandlerImpl.*;
 
 import java.util.concurrent.ExecutionException;
 
@@ -20,26 +19,23 @@ public class WsClient {
 
     private static final Logger logger = LoggerFactory.getLogger(WsClient.class);
 
-    private static volatile WebSocket webSocketClient = null;
+    private static AsyncHttpClient client = Dsl.asyncHttpClient(Dsl.config().setWebSocketMaxFrameSize(40960).build());
 
-    public static WebSocket getWebSocketClient(WebSocketUpgradeHandler wsHandler) {
-        if (webSocketClient == null) {
-            synchronized (WsClient.class) {
-                if (webSocketClient == null) {
-                        // 数据后端http端口为8002，ws端口为8003
-                    try {
-                        webSocketClient = Dsl.asyncHttpClient()
-                                .prepareGet("ws://localhost:8003/handle")
-                                .setRequestTimeout(5000)
-                                .execute(wsHandler)
-                                .get();
-                    } catch (InterruptedException | ExecutionException e) {
-                        e.printStackTrace();
-                    }
-                    return webSocketClient;
-                }
-            }
+    private static volatile WebSocket webSocketClient;
+
+    static {
+        try {
+            webSocketClient = client
+                        .prepareGet("ws://localhost:8003/handle")
+                        .setRequestTimeout(5000)
+                        .execute(wsHandler)
+                        .get();
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
         }
+    }
+
+    public static WebSocket getWebSocketClient() {
         return webSocketClient;
     }
 
