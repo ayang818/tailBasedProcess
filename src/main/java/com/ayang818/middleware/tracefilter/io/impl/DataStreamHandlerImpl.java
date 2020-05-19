@@ -343,6 +343,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
         // 最后一次扫描完后，向数据后端发送 FIN 消息，告知数据已经过滤发送完毕，可以进行下一步处理了
         if (isFin) {
+            logger.info("已发送终止请求......");
             String msg = String.format("{\"type\": %d}", FIN_TYPE);
             wsclient.sendTextFrame(msg);
         }

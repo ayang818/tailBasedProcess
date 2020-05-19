@@ -17,6 +17,8 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * @author 杨丰畅
@@ -31,17 +33,19 @@ public class ReadyController {
 
     private static final Logger logger = LoggerFactory.getLogger(ReadyController.class);
 
+    private static final ExecutorService SINGLE_TRHEAD = Executors.newSingleThreadExecutor();
+
     @RequestMapping(value = "ready")
     public String ready(HttpServletResponse response) {
+        logger.info("数据过滤容器收到ready");
         return "suc";
     }
 
-    @RequestMapping(value = "setParamter")
-    public String setParamter(@RequestParam String dataport, HttpServletResponse response) {
-        if (dataport != null) {
-            logger.info("数据过滤容器获取到端口参数 {}", dataport);
-            // 开始从数据流中拉取数据
-            dataPuller.pulldata(dataport);
+    @RequestMapping(value = "setParameter")
+    public String setParamter(@RequestParam String port, HttpServletResponse response) {
+        if (port != null) {
+            logger.info("数据过滤容器获取到端口参数 {}", port);
+            SINGLE_TRHEAD.execute(() -> dataPuller.pulldata(port));
         } else {
             logger.warn("未接收到数据源端口");
         }
