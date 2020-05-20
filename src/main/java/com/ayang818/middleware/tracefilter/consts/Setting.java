@@ -50,7 +50,7 @@ public class Setting {
     /**
      *  【websocket frame信息标识】 ： 等待判定链路
      */
-    public static final int PENDING_TYPE = 1;
+    public static final int REAL_FIN_TYPE = 3;
 
     /**
      *  【websocket frame信息标识】 ： 表示所有数据均已经发送完
@@ -58,4 +58,5 @@ public class Setting {
     public static final int FIN_TYPE = 2;
 
     public static final String PULL_ERR_MSG = "{\"type\": 1}";
+
 }

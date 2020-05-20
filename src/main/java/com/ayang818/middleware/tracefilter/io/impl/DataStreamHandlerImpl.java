@@ -68,7 +68,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
      */
     private static AtomicInteger lineNumber = new AtomicInteger(0);
 
-    public static final WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
+    private WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
             .addWebSocketListener(new WebSocketListener() {
                 @Override
                 public void onOpen(WebSocket websocket) {
@@ -78,17 +78,14 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
                 @Override
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
-                    JSONObject res = JSON.parseObject(payload);
-                    String resType = (String) res.get("resType");
-                    if (lineNumber.get() < 100000) {
-                        return ;
-                    }
-                    if (Objects.equals(resType, "free")) {
-                        Set<String> recSet = res.getObject("data", new TypeReference<Set<String>>() {
-                        });
-                        Integer minLineNumber = res.getObject("minLineNumber", Integer.class);
-                        System.out.println("收到最小行号为"+ minLineNumber +"当前行号为" + lineNumber.get());
-                        THREAD_POOL.execute(() -> {
+                    THREAD_POOL.execute(() -> {
+                        JSONObject res = JSON.parseObject(payload);
+                        String resType = (String) res.get("resType");
+
+                        if (Objects.equals(resType, "free")) {
+                            Set<String> recSet = res.getObject("data", new TypeReference<Set<String>>() {
+                            });
+                            Integer minLineNumber = res.getObject("minLineNumber", Integer.class);
                             logger.info("开始标记和释放链路......");
                             // 增加新的traceId
                             errTraceIdSet.addAll(recSet);
@@ -102,19 +99,37 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                                 if (errTraceIdSet.contains(entry.getKey())) {
                                     entry.getValue().setAsErrorTrace();
                                 } else {
-                                    //if (minLineNumber - entry.getValue().getFirstOccurrenceLine() >= 20000) {
-                                    //    it.remove();
-                                    //}
-                                    if (lineNumber.get() - entry.getValue().getFirstOccurrenceLine() >= 100000) {
+                                    if (minLineNumber - entry.getValue().getFirstOccurrenceLine() >= 20000) {
                                         it.remove();
                                     }
                                 }
                             }
                             logger.info("结束释放和标记链路......");
-                        });
-                    } else {
-                        logger.warn("接收到异常数据! {}", payload);
-                    }
+                        } else if (Objects.equals(resType, "last")) {
+                            Set<String> recSet = res.getObject("data", new TypeReference<Set<String>>() {
+                            });
+                            errTraceIdSet.addAll(recSet);
+                            Set<Map.Entry<String, Trace>> entries = TRACE_MAP.entrySet();
+                            Iterator<Map.Entry<String, Trace>> it = entries.iterator();
+                            Map.Entry<String, Trace> entry;
+                            // 这里又对整个trace_map进行了一次扫描
+                            while (it.hasNext()) {
+                                entry = it.next();
+                                // 没有上报的错误链路，标记
+                                if (errTraceIdSet.contains(entry.getKey())) {
+                                    entry.getValue().setAsErrorTrace();
+                                }
+                            }
+                            scanMap(lineNumber.get(), false);
+                            // 发送最终的realFin
+                            String msg = String.format("{\"type\": %d}", REAL_FIN_TYPE);
+                            wsclient.sendTextFrame(msg);
+                        }
+                        else {
+                            logger.warn("接收到异常数据! {}", payload);
+                        }
+
+                    });
                 }
 
                 @Override
@@ -135,7 +150,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     @Override
     public void handleDataStream(InputStream dataStream) {
         logger.info("连接数据源成功，开始拉取数据......");
-        wsclient = WsClient.getWebSocketClient();
+        wsclient = WsClient.getWebSocketClient(wsHandler);
         if (wsclient == null) {
             logger.info("连接建立失败......");
             return;
@@ -299,6 +314,9 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
         Trace trace;
 
+        StringBuilder msg = new StringBuilder();
+        msg.append("{");
+        msg.append("\"type\": ").append(ERROR_TYPE).append(",").append(" \"data\": [");
         while (it.hasNext()) {
             entry = it.next();
             trace = entry.getValue();
@@ -311,14 +329,12 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                     // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
                     trace.getSpans().sort((span1, span2) -> span1.getStartTime() - span2.getStartTime() > 0 ? 1 : 0);
 
-                    String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), lineNumber, trace.getSpans().toString(), ERROR_TYPE);
-                    wsclient.sendTextFrame(msg);
-
+                    msg.append(String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), lineNumber, trace.getSpans().toString(), ERROR_TYPE));
+                    msg.append(",");
                     // 删除Map中的键值，释放内存
                     TRACE_MAP.remove(trace.getTraceId());
 
                     sendErrorTimes += 1;
-                    sendFrameTimes += 1;
 
                     // 用于确保在本条链路一定错误的上报率为 100%
                     totalErrSum.getAndAdd(1);
@@ -326,13 +342,17 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
             }
         }
+        msg.append("]\n").append("}");
+        logger.info("发送数据长度 {} KB", msg.toString().getBytes().length / 1024);
+        wsclient.sendTextFrame(msg.toString());
+
 
         // 最后一次扫描完后，向数据后端发送 FIN 消息，告知数据已经过滤发送完毕，可以进行下一步处理了
         if (isFin) {
             logger.info("已准备发送终止请求......");
             if (wsclient.isOpen()) {
-                String msg = String.format("{\"type\": %d}", FIN_TYPE);
-                wsclient.sendTextFrame(msg);
+                String tmpMsg = String.format("{\"type\": %d}", FIN_TYPE);
+                wsclient.sendTextFrame(tmpMsg);
                 logger.info("终止请求发送成功......");
             } else {
                 logger.info("连接已断开，终止请求发送失败......");
@@ -344,7 +364,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
         scanNum.addAndGet(1);
 
-        logger.info("第 {} 次扫描结束Trace_Map, 共扫描 {} 个对象, 共发送 {} 次frame，其中 {} 次为错误，{} 次为正确。", scanNum.get(), size, sendFrameTimes, sendErrorTimes, sendTrueTimes);
+        logger.info("第 {} 次扫描结束Trace_Map, 共扫描 {} 个对象, 发现 {} 条错误链路。", scanNum.get(), size, sendErrorTimes);
     }
 
 }

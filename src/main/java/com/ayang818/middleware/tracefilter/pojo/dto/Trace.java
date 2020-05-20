@@ -25,7 +25,7 @@ public class Trace {
     /**
      * 是否为正确链路
      */
-    private Boolean isNormalTrace;
+    private volatile Boolean isNormalTrace;
 
     /**
      * 这条trace中的每条span
