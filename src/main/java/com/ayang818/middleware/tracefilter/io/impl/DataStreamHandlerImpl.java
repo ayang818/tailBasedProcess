@@ -44,7 +44,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     private static final ConcurrentHashMap<String, Trace> TRACE_MAP =
             new ConcurrentHashMap<>(8192);
 
-    private static final ExecutorService SINGLE_TRHEAD = Executors.newSingleThreadExecutor();
+    private static final ExecutorService THREAD_POOL = Executors.newFixedThreadPool(3);
 
     private static WebSocket wsclient = null;
 
@@ -78,17 +78,18 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
                 @Override
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
-                    logger.info("接收到数据中的回复，开始处理消息......");
                     JSONObject res = JSON.parseObject(payload);
                     String resType = (String) res.get("resType");
                     if (lineNumber.get() < 100000) {
                         return ;
                     }
                     if (Objects.equals(resType, "free")) {
-                        logger.info("开始标记和释放链路......");
                         Set<String> recSet = res.getObject("data", new TypeReference<Set<String>>() {
                         });
-                        SINGLE_TRHEAD.execute(() -> {
+                        Integer minLineNumber = res.getObject("minLineNumber", Integer.class);
+                        System.out.println("收到最小行号为"+ minLineNumber +"当前行号为" + lineNumber.get());
+                        THREAD_POOL.execute(() -> {
+                            logger.info("开始标记和释放链路......");
                             // 增加新的traceId
                             errTraceIdSet.addAll(recSet);
                             Set<Map.Entry<String, Trace>> entries = TRACE_MAP.entrySet();
@@ -97,24 +98,23 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                             // 这里又对整个trace_map进行了一次扫描
                             while (it.hasNext()) {
                                 entry = it.next();
+                                // 没有上报的错误链路，标记
                                 if (errTraceIdSet.contains(entry.getKey())) {
                                     entry.getValue().setAsErrorTrace();
                                 } else {
-                                    //// 这里容易删除掉不该删除的数据
-                                    //if (entry.getKey().equals("6a23ffc5521fc3eb")) {
-                                    //    logger.info("删除了不该删除的数据!!!!!!!!!!!!!!!!!!!");
+                                    //if (minLineNumber - entry.getValue().getFirstOccurrenceLine() >= 20000) {
+                                    //    it.remove();
                                     //}
                                     if (lineNumber.get() - entry.getValue().getFirstOccurrenceLine() >= 100000) {
                                         it.remove();
                                     }
                                 }
                             }
+                            logger.info("结束释放和标记链路......");
                         });
-                        logger.info("结束释放和标记链路......");
                     } else {
                         logger.warn("接收到异常数据! {}", payload);
                     }
-                    logger.info("处理后端消息结束");
                 }
 
                 @Override
@@ -181,8 +181,6 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             // 检查当前行号是否到达需要检查的分界线，若到达，检查Map，并将checkLine后移
             if (lineNumber.get() > checkLine) {
                 scanMap(lineNumber.get(), false);
-                //scanMapParallely(lineNumber, false);
-
                 checkLine += SCAN_TRACE_MAP_INTERVAL;
             }
 
@@ -195,7 +193,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                     // 统计收到的字节数，这个没啥用
                     sumbytes += lineData.getBytes().length;
                     // 处理一行数据；返回是否为错误行；
-                        handleLine(lineData, lineNumber.get());
+                    handleLine(lineData, lineNumber.get());
                     strbuilder.delete(0, strbuilder.length());
                 } else {
                     strbuilder.append(chars[i]);
@@ -313,7 +311,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                     // 由于当前行数已经相差2w，所以默认在本机是不会产生新的数据的。
                     trace.getSpans().sort((span1, span2) -> span1.getStartTime() - span2.getStartTime() > 0 ? 1 : 0);
 
-                    String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), trace.getFirstOccurrenceLine(), trace.getSpans().toString(), ERROR_TYPE);
+                    String msg = String.format("{\"traceId\": \"%s\", \"curLine\": %d, \"spans\": %s, \"type\": %d}", trace.getTraceId(), lineNumber, trace.getSpans().toString(), ERROR_TYPE);
                     wsclient.sendTextFrame(msg);
 
                     // 删除Map中的键值，释放内存
