@@ -46,9 +46,7 @@ public class DataPullerImpl implements DataPuller {
             logger.info("开始连接数据源 {}......", dataSourceUrl);
             HttpResponse response = client.execute(new HttpGet(dataSourceUrl));
 
-            dataStreamHandler.handleDataStreamWithNio(response.getEntity().getContent());
-
-            //dataStreamHandler.handleDataStreamWithBio(response.getEntity().getContent());
+            dataStreamHandler.handleDataStream(response.getEntity().getContent());
         } catch (IOException e) {
             e.printStackTrace();
         }
