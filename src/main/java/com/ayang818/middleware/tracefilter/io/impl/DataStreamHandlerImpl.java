@@ -15,12 +15,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
-import java.util.*;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -68,7 +73,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
      */
     private static AtomicInteger lineNumber = new AtomicInteger(0);
 
-    private WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
+    public static WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
             .addWebSocketListener(new WebSocketListener() {
                 @Override
                 public void onOpen(WebSocket websocket) {
@@ -124,8 +129,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                             // 发送最终的realFin
                             String msg = String.format("{\"type\": %d}", REAL_FIN_TYPE);
                             wsclient.sendTextFrame(msg);
-                        }
-                        else {
+                        } else {
                             logger.warn("接收到异常数据! {}", payload);
                         }
 
@@ -148,9 +152,9 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
             }).build();
 
     @Override
-    public void handleDataStream(InputStream dataStream) {
+    public void handleDataStreamWithNio(InputStream dataStream) {
         logger.info("连接数据源成功，开始拉取数据......");
-        wsclient = WsClient.getWebSocketClient(wsHandler);
+        wsclient = WsClient.getWebSocketClient();
         if (wsclient == null) {
             logger.info("连接建立失败......");
             return;
@@ -167,6 +171,40 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     }
 
     @Override
+    public void handleDataStreamWithBio(InputStream dataStream) {
+        long startTime = System.currentTimeMillis();
+        BufferedReader bf = new BufferedReader(new InputStreamReader(dataStream));
+        String lineData;
+
+        // 在第几行检查Map
+        int checkLine = 40000;
+
+        try {
+            while ((lineData = bf.readLine()) != null) {
+                lineNumber.getAndAdd(1);
+
+                // 检查当前行号是否到达需要检查的分界线，若到达，检查Map，并将checkLine后移
+                if (lineNumber.get() > checkLine) {
+                    scanMap(lineNumber.get(), false);
+                    checkLine += SCAN_TRACE_MAP_INTERVAL;
+                }
+
+                handleLine(lineData, lineNumber.get());
+
+            }
+
+            scanMap(lineNumber.get(), true);
+
+            logger.info("拉取数据源完毕，耗时 {} ms......", System.currentTimeMillis() - startTime);
+            logger.info("共检测到 {} 条Trace出错", errTraceIdSet.size());
+            logger.info("共上报 {} 条错误Trace", totalErrSum.get());
+            logger.info("共拉到 {} 行数据", lineNumber);
+        } catch (IOException e) {
+            logger.warn("读取数据流出错");
+        }
+    }
+
+    @Override
     public void filterLine(ReadableByteChannel inChannel, ByteBuffer readByteBuffer) throws IOException {
         // 起始时间
         long startTime = System.currentTimeMillis();
@@ -176,9 +214,6 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
 
         // 行字符串构造器
         StringBuilder strbuilder = new StringBuilder();
-
-        // 总字节数，用于统计数据是否有坑 + 为后续多线程拉取速度对比提供分段标准
-        long sumbytes = 0;
 
         // 在第几行检查Map
         int checkLine = 40000;
@@ -205,8 +240,6 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
                     lineNumber.addAndGet(1);
                     // 得到一行数据
                     String lineData = strbuilder.toString();
-                    // 统计收到的字节数，这个没啥用
-                    sumbytes += lineData.getBytes().length;
                     // 处理一行数据；返回是否为错误行；
                     handleLine(lineData, lineNumber.get());
                     strbuilder.delete(0, strbuilder.length());
@@ -223,7 +256,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
         logger.info("拉取数据源完毕，耗时 {} ms......", System.currentTimeMillis() - startTime);
         logger.info("共检测到 {} 条Trace出错", errTraceIdSet.size());
         logger.info("共上报 {} 条错误Trace", totalErrSum.get());
-        logger.info("共拉到 {} 行数据，每行数据平均大小 {} 字节", lineNumber, sumbytes / lineNumber.get());
+        logger.info("共拉到 {} 行数据", lineNumber);
 
     }
 
@@ -266,7 +299,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
      * @param traceId    此行的traceId
      * @param lineData   此行的内容
      * @param lineNumber 此行的行号
-     * @description      标记错误链路
+     * @description 标记错误链路
      */
     private void handleWrongLine(String traceId, String lineData, Integer lineNumber) {
         // 用于记录错误 trace 数量
@@ -279,11 +312,11 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
     }
 
     /**
-     * @description 更新map
      * @param traceId
      * @param lineData
      * @param lineNumber
      * @param startTime
+     * @description 更新map
      */
     private void updateMapAfterAnalyzeLine(String traceId, String lineData, Integer lineNumber, String startTime) {
         // 更新数据
@@ -303,7 +336,7 @@ public class DataStreamHandlerImpl implements DataStreamHandler {
      * @param lineNumber 在开始这次扫描时，解析到的行号，在扫描的过程中，这个数字不会改变
      * @param isFin      是否是最后一次扫描
      */
-    private void scanMap(Integer lineNumber, Boolean isFin) {
+    private static void scanMap(Integer lineNumber, Boolean isFin) {
         int size = TRACE_MAP.size();
         Iterator<Map.Entry<String, Trace>> it = TRACE_MAP.entrySet().iterator();
         Map.Entry<String, Trace> entry;

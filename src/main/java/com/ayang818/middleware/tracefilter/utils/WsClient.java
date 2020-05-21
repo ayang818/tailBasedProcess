@@ -6,6 +6,9 @@ import org.asynchttpclient.ws.WebSocket;
 import org.asynchttpclient.ws.WebSocketUpgradeHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import static com.ayang818.middleware.tracefilter.io.impl.DataStreamHandlerImpl.*;
 
 import java.util.concurrent.ExecutionException;
 
@@ -14,6 +17,7 @@ import java.util.concurrent.ExecutionException;
  * @description TODO
  * @date 2020/5/14 20:19
  **/
+@Component
 public class WsClient {
 
     private static final Logger logger = LoggerFactory.getLogger(WsClient.class);
@@ -22,16 +26,19 @@ public class WsClient {
 
     private static volatile WebSocket webSocketClient;
 
-    public static WebSocket getWebSocketClient(WebSocketUpgradeHandler wsHandler) {
+    static {
         try {
             webSocketClient = client
-                    .prepareGet("ws://localhost:8003/handle")
-                    .setRequestTimeout(5000)
-                    .execute(wsHandler)
-                    .get();
+                        .prepareGet("ws://localhost:8003/handle")
+                        .setRequestTimeout(10000)
+                                .execute(wsHandler)
+                                .get();
         } catch (InterruptedException | ExecutionException e) {
             e.printStackTrace();
         }
+    }
+
+    public static WebSocket getWebSocketClient() {
         return webSocketClient;
     }
 
