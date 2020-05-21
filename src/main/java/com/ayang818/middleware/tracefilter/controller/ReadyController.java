@@ -52,38 +52,4 @@ public class ReadyController {
         response.setHeader("status", "200");
         return "suc";
     }
-
-    @RequestMapping(value = "/trace1.data", method = RequestMethod.GET)
-    public void pullTest(HttpServletResponse response) {
-        logger.info("接收到请求，开始输出数据......");
-        try (OutputStream outputStream = response.getOutputStream()){
-            BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/trace1.data"), StandardCharsets.UTF_8);
-            char[] charBuffer = new char[1024];
-            byte[] byteBuffer = new byte[1024];
-            while (bufferedReader.read(charBuffer) != -1) {
-                byte[] bytes = CastUtil.chars2bytes(charBuffer, byteBuffer);
-                outputStream.write(bytes);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        logger.info("输出数据完毕");
-    }
-
-    @RequestMapping(value = "/trace2.data", method = RequestMethod.GET)
-    public void pullTest2(HttpServletResponse response) {
-        logger.info("接收到请求，开始输出数据......");
-        try (OutputStream outputStream = response.getOutputStream()){
-            BufferedReader bufferedReader = Files.newBufferedReader(Paths.get("D:/middlewaredata/trace2.data"), StandardCharsets.UTF_8);
-            char[] charBuffer = new char[1024];
-            byte[] byteBuffer = new byte[1024];
-            while (bufferedReader.read(charBuffer) != -1) {
-                byte[] bytes = CastUtil.chars2bytes(charBuffer, byteBuffer);
-                outputStream.write(bytes);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        logger.info("输出数据完毕");
-    }
 }
