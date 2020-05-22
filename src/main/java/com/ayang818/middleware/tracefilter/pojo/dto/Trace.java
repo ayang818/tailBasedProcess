@@ -30,7 +30,7 @@ public class Trace {
     /**
      * 这条trace中的每条span
      */
-    private List<Span> spans;
+    private List<String> spans;
 
     public Trace(String traceId, Integer lineNumber) {
         this.traceId = traceId;
@@ -46,7 +46,7 @@ public class Trace {
      * @param startTime
      */
     public void addNewSpan(String lineData, String startTime) {
-        this.spans.add(new Span(Long.valueOf(startTime), lineData));
+        this.spans.add(lineData);
     }
 
     /**
@@ -68,7 +68,7 @@ public class Trace {
         return this.isNormalTrace;
     }
 
-    public List<Span> getSpans() {
+    public List<String> getSpans() {
         return this.spans;
     }
 }

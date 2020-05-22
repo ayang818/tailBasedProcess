@@ -15,7 +15,9 @@ public class Setting {
     /**
      *  扫描 map 的间隔
      */
-    public static final Integer SCAN_TRACE_MAP_INTERVAL = 20000;
+    public static final Integer SEND_TRACE_MAP_INTERVAL = 20000;
+
+    public static final Integer SEND_THRESHOLD = 40000;
 
     /**
      *  【websocket frame信息标识】 ： 错误链路
