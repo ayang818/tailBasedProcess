@@ -3,10 +3,10 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.ayang818.middleware</groupId>
-    <artifactId>trace-fliter</artifactId>
+    <artifactId>tailBaseProcess</artifactId>
     <version>1.0.0</version>
-    <name>trace-filter</name>
-    <description>trace-filter</description>
+    <name>tailBaseProcess</name>
+    <description>tailBaseProces</description>
 
     <properties>
         <java.version>1.8</java.version>
@@ -37,11 +37,17 @@
             <version>${fastjson.version}</version>
         </dependency>
 
-<!--        <dependency>-->
-<!--            <groupId>io.netty</groupId>-->
-<!--            <artifactId>netty-all</artifactId>-->
-<!--            <version>${netty4.version}</version>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-all</artifactId>
+            <version>${netty4.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>3.10.0</version>
+        </dependency>
 
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -120,7 +126,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>2.2.6.RELEASE</version>
                 <configuration>
-                    <mainClass>com.ayang818.middleware.tracefilter.TraceFliterApplication</mainClass>
+                    <mainClass>com.ayang818.middleware.tailbase.MultiEntry</mainClass>
                 </configuration>
                 <executions>
                     <execution>

@@ -1,16 +1,14 @@
-package com.ayang818.middleware.tracefilter.utils;
+package com.ayang818.middleware.tailbase.utils;
 
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.Dsl;
 import org.asynchttpclient.ws.WebSocket;
-import org.asynchttpclient.ws.WebSocketUpgradeHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import static com.ayang818.middleware.tracefilter.io.impl.DataStreamHandlerImpl.*;
-
 import java.util.concurrent.ExecutionException;
+import static com.ayang818.middleware.tailbase.client.TextFrameHandler.*;
 
 /**
  * @author 杨丰畅
