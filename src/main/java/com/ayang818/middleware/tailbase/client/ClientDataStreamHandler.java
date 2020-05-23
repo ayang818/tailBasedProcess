@@ -76,8 +76,6 @@ public class ClientDataStreamHandler implements Runnable {
             Set<String> tmpBadTraceIdSet = new HashSet<>(1000);
             Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
 
-            Object lock = lockList.get(bucketPos % BUCKET_COUNT);
-
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
                 count++;
@@ -111,8 +109,8 @@ public class ClientDataStreamHandler implements Runnable {
 
                     //lock.notify();
                     //lock = lockList.get(bucketPos % BUCKET_COUNT);
-
-                    updateWrongTraceId(tmpBadTraceIdSet, pos);
+                    // 这里应该是前一个pos才对
+                    updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
                 }
             }
             // last update, clear the badTraceIdSet
@@ -149,39 +147,42 @@ public class ClientDataStreamHandler implements Runnable {
      * 给定 区间中的所有错误traceId和pos，拉取对应traceIds的spans
      *
      * @param wrongTraceIdList
-     * @param bucketPos
+     * @param pos
      * @return
      */
-    public static String getWrongTracing(List<String> wrongTraceIdList, int bucketPos) {
+    public static String getWrongTracing(List<String> wrongTraceIdList, int pos) {
         // calculate the three continue pos
-        int pos = bucketPos % BUCKET_COUNT;
-        int previous = (bucketPos - 1) % BUCKET_COUNT;
-        int next = (bucketPos + 1) % BUCKET_COUNT;
+        int curr = pos % BUCKET_COUNT;
+        int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
+        int next = (curr + 1 == BUCKET_COUNT) ? 0 : (curr + 1) % BUCKET_COUNT;
+
+        logger.info(String.format("curr: %d, prev: %d, next: %d", curr, prev, next));
 
         // a tmp map to collect spans
         Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
         // these traceId data should be collect
 
-        getWrongTraceWithBucketPos(previous, bucketPos, wrongTraceIdList, wrongTraceMap);
-        getWrongTraceWithBucketPos(pos, bucketPos, wrongTraceIdList, wrongTraceMap);
-        getWrongTraceWithBucketPos(next, bucketPos, wrongTraceIdList, wrongTraceMap);
+        getWrongTraceWithBucketPos(prev, pos, wrongTraceIdList, wrongTraceMap);
+        getWrongTraceWithBucketPos(curr, pos, wrongTraceIdList, wrongTraceMap);
+        getWrongTraceWithBucketPos(next, pos, wrongTraceIdList, wrongTraceMap);
 
         // the previous bucket must have been consumed, so free this bucket
-        BUCKET_TRACE_LIST.get(previous).clear();
+        BUCKET_TRACE_LIST.get(prev).clear();
 
         return JSON.toJSONString(wrongTraceMap);
     }
 
     /**
-     * @param pos
      * @param bucketPos
+     * @param pos
      * @param traceIdList
      * @param wrongTraceMap
      */
-    private static void getWrongTraceWithBucketPos(int pos, int bucketPos, List<String> traceIdList, Map<String, List<String>> wrongTraceMap) {
+    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, List<String> traceIdList, Map<String, List<String>> wrongTraceMap) {
         // backend start pull these bucket
-        Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(pos);
-
+        // 这里 bucketPos 为什么是负数呢
+        Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+        logger.info("开始扫描bucket, bucketPos: {}, pos: {}", bucketPos, pos);
         for (String traceId : traceIdList) {
             List<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
@@ -195,9 +196,10 @@ public class ClientDataStreamHandler implements Runnable {
                     wrongTraceMap.put(traceId, spanList);
                 }
                 logger.info(String.format("拉取错误链路具体内容, bucketPos: %d, pos: %d, traceId: %s, spanListSize: %d",
-                        pos, bucketPos, traceId, spanList.size()));
+                        bucketPos, pos, traceId, spanList.size()));
             }
         }
+        logger.info("======================================");
     }
 
     private void callFinish() {

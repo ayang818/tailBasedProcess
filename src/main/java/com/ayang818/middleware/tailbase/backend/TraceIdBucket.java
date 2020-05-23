@@ -11,16 +11,25 @@ import java.util.List;
  * @date 2020/5/22 23:21
  **/
 public class TraceIdBucket {
-    private int bucketPos = 0;
+    private boolean waiting = false;
+    private int pos = 0;
     private int processCount = 0;
     private List<String> traceIdList = new ArrayList<>(Constants.BUCKET_SIZE / 10);
 
-    public int getBucketPos() {
-        return bucketPos;
+    public int getPos() {
+        return pos;
     }
 
-    public void setBucketPos(int bucketPos) {
-        this.bucketPos = bucketPos;
+    public void setPos(int pos) {
+        this.pos = pos;
+    }
+
+    public void setAsWaiting() {
+        this.waiting = true;
+    }
+
+    public boolean isWaiting() {
+        return this.waiting;
     }
 
     public int getProcessCount() {
@@ -37,8 +46,9 @@ public class TraceIdBucket {
     }
 
     public void clear() {
-        bucketPos = 0;
+        pos = 0;
         processCount = 0;
+        waiting = false;
         traceIdList.clear();
     }
 }

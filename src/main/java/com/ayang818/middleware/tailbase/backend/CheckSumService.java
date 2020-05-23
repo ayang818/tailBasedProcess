@@ -10,10 +10,8 @@ import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -52,20 +50,17 @@ public class CheckSumService implements Runnable {
                 }
                 continue;
             }
-            prePos = bucket.getBucketPos();
+            prePos = bucket.getPos();
             // 发送取到的errTraceId 和 对应的 pos
             List<String> traceIdList = bucket.getTraceIdList();
-            int bucketPos = bucket.getBucketPos();
+            int pos = bucket.getPos();
 
-            logger.info("即将拉取数据client {} pos 的traceId {}", bucketPos, traceIdList.toString());
             if (!traceIdList.isEmpty()) {
                 String traceIdListString = JSON.toJSONString(traceIdList);
                 // pull data from each client, then MessageHandler will consume these data
-                MessageHandler.pullWrongTraceDetails(traceIdListString, bucketPos);
-
+                MessageHandler.pullWrongTraceDetails(traceIdListString, pos);
+                bucket.setAsWaiting();
             }
-            bucket.clear();
-            logger.info("清空 {} pos 的bucket", bucketPos);
         }
     }
     public static boolean sendCheckSum() {

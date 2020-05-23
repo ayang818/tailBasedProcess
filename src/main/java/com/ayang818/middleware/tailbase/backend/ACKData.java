@@ -2,6 +2,7 @@ package com.ayang818.middleware.tailbase.backend;
 
 import com.ayang818.middleware.tailbase.Constants;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,8 +18,14 @@ public class ACKData {
 
     private ConcurrentHashMap<String, List<String>> ackMap = new ConcurrentHashMap<>(32);
 
-    public int putAll(Map<String, List<String>> map) {
-        ackMap.putAll(map);
+    public synchronized int putAll(Map<String, List<String>> map) {
+        for (Map.Entry<String, List<String>> entry : map.entrySet()) {
+            ackMap.computeIfPresent(entry.getKey(), (key, val) -> {
+                val.addAll(entry.getValue());
+                return val;
+            });
+            ackMap.putIfAbsent(entry.getKey(), entry.getValue());
+        }
         return remainAccessTime.decrementAndGet();
     }
 

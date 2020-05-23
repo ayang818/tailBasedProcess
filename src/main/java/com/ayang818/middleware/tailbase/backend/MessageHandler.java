@@ -117,10 +117,11 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         if (remainAccessTime == 0) {
 
             Map<String, List<String>> map = ackData.getAckMap();
+
             StringBuilder sb = new StringBuilder();
 
-
             for (Map.Entry<String, List<String>> entry : map.entrySet()) {
+                // TODO 这里记录到的日志有两种问题 1.span重复 2.span缺失 无一例外
                 sb.append("traceId : ").append(entry.getKey()).append("  size : ").append(entry.getValue().size()).append("\n");
 
                 String spans = entry.getValue()
@@ -133,8 +134,8 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 resMap.put(entry.getKey(), md5(spans));
             }
 
-            // 清空ackMap
-            ackData.clear();
+            TRACEID_BUCKET_LIST.get(pos % BUCKET_COUNT).clear();
+            logger.info("{} 处的bucket处理完毕，清空此处的 bucket", pos);
 
             try {
                 Files.write(Paths.get("D:/middlewaredata/my.data"), sb.toString().getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
@@ -153,33 +154,31 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     /**
      * 向client发送拉取数据的请求
      * @param traceIdListString
-     * @param bucketPos
+     * @param pos
      */
-    public static void pullWrongTraceDetails(String traceIdListString, int bucketPos) {
-        String msg = String.format("{\"type\": %d, \"traceIdList\": %s, \"bucketPos\": %d}",
-                Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, bucketPos);
-        logger.info(msg);
+    public static void pullWrongTraceDetails(String traceIdListString, int pos) {
+        String msg = String.format("{\"type\": %d, \"traceIdList\": %s, \"pos\": %d}",
+                Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, pos);
         channels.writeAndFlush(new TextWebSocketFrame(msg));
-        logger.info("已向client发送拉取bucket data请求.....");
+        logger.info("发送拉取 {} pos处 bucket data请求.....", pos);
     }
 
     /**
      * 将client主动推送过来的错误traceIdList，放置到backend 等待消费的 对应位置的 bucket 中
      * @param badTraceIdList
-     * @param bucketPos
+     * @param pos
      */
-    public void setWrongTraceId(List<String> badTraceIdList, int bucketPos) {
-        int pos = bucketPos % BUCKET_COUNT;
-        TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(pos);
-        if (traceIdBucket.getBucketPos() != 0 && traceIdBucket.getBucketPos() != bucketPos) {
-            logger.warn("覆盖了 {} 位置的正在工作的 bucket!!!", pos);
+    public void setWrongTraceId(List<String> badTraceIdList, int pos) {
+        int bucketPos = pos % BUCKET_COUNT;
+        TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(bucketPos);
+        if (traceIdBucket.getPos() != 0 && traceIdBucket.getPos() != pos) {
+            logger.warn("覆盖了 {} 位置的正在工作的 bucket!!!", bucketPos);
         }
-        logger.info("收到badTraceIdList : {}", badTraceIdList.toString());
         if (badTraceIdList != null && badTraceIdList.size() > 0) {
-            traceIdBucket.setBucketPos(bucketPos);
+            traceIdBucket.setPos(pos);
             int processCount = traceIdBucket.addProcessCount();
             traceIdBucket.getTraceIdList().addAll(badTraceIdList);
-            logger.info(String.format("backend %d 位置的 bucket 访问次数到达 %d", pos, processCount));
+            logger.info(String.format("%d 位置的 bucket 访问次数到达 %d", bucketPos, processCount));
         }
     }
 
@@ -193,14 +192,9 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         int end = startPos + BUCKET_COUNT;
         for (int i = startPos; i < end; i++) {
             int cur = i % BUCKET_COUNT;
-            int next = (i + 1) % BUCKET_COUNT;
-
             TraceIdBucket currentBucket = TRACEID_BUCKET_LIST.get(cur);
-            TraceIdBucket nextBucket = TRACEID_BUCKET_LIST.get(next);
-            //if ((FINISH_PROCESS_COUNT >= PROCESS_COUNT && currentBatch.getBucketPos() > 0) ||
-            //        (nextBatch.getProcessCount() >= PROCESS_COUNT && currentBatch.getProcessCount() >= PROCESS_COUNT)) {
-            if (currentBucket.getProcessCount() >= PROCESS_COUNT) {
-                // reset
+
+            if (currentBucket.getProcessCount() >= PROCESS_COUNT && !currentBucket.isWaiting()) {
                 return currentBucket;
             }
         }
@@ -216,7 +210,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         if (FIN_TIME.get() < PROCESS_COUNT) return false;
         // bucket中元素是否消费完
         for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
-            if (traceIdBucket.getBucketPos() != 0) {
+            if (traceIdBucket.getPos() != 0) {
                 return false;
             }
         }
@@ -249,7 +243,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
             // 访问次数达到了请求client数据来消费
             String traceIdListString = JSON.toJSONString(traceIdBucket.getTraceIdList());
-            int bucketPos = traceIdBucket.getBucketPos();
+            int bucketPos = traceIdBucket.getPos();
             String msg = String.format("{\"type\": %d, \"traceIdList\": %s, \"bucketPos\": %d}",
                     Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, bucketPos);
             channels.writeAndFlush(new TextWebSocketFrame(msg));
