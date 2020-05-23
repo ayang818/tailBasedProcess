@@ -25,7 +25,9 @@ public class CheckSumService implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(CheckSumService.class);
 
-    private static Map<String, String> resMap = new ConcurrentHashMap<>();
+    public static Map<String, String> resMap = new ConcurrentHashMap<>();
+
+    private int prePos = -1;
 
     public static void start() {
         new Thread(new CheckSumService(), "CheckSumThread").start();
@@ -35,7 +37,7 @@ public class CheckSumService implements Runnable {
     public void run() {
         TraceIdBucket traceIdBucket = null;
         while (true) {
-            TraceIdBucket bucket = MessageHandler.getFinishedBucket();
+            TraceIdBucket bucket = MessageHandler.getFinishedBucket(prePos + 1);
             if (bucket == null) {
                 // 考虑是否已经全部消费完了
                 if (MessageHandler.isFin()) {
@@ -50,18 +52,23 @@ public class CheckSumService implements Runnable {
                 }
                 continue;
             }
-            HashMap<String, Set<String>> map = new HashMap<>();
+            prePos = bucket.getBucketPos();
+            // 发送取到的errTraceId 和 对应的 pos
             List<String> traceIdList = bucket.getTraceIdList();
+            int bucketPos = bucket.getBucketPos();
+
+            logger.info("即将拉取数据client {} pos 的traceId {}", bucketPos, traceIdList.toString());
             if (!traceIdList.isEmpty()) {
-                int bucketPos = bucket.getBucketPos();
                 String traceIdListString = JSON.toJSONString(traceIdList);
                 // pull data from each client, then MessageHandler will consume these data
                 MessageHandler.pullWrongTraceDetails(traceIdListString, bucketPos);
+
             }
+            bucket.clear();
+            logger.info("清空 {} pos 的bucket", bucketPos);
         }
     }
-
-    public boolean sendCheckSum() {
+    public static boolean sendCheckSum() {
         try {
             String result = JSON.toJSONString(resMap);
             RequestBody body = new FormBody.Builder()
@@ -72,7 +79,7 @@ public class CheckSumService implements Runnable {
             Response response = BaseUtils.callHttp(request);
             if (response.isSuccessful()) {
                 response.close();
-                logger.warn("success to sendCheckSum, result:" + result);
+                logger.warn("已向评测程序发送checkSum......");
                 return true;
             }
             logger.warn("fail to sendCheckSum:" + response.message());

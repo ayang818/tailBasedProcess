@@ -21,6 +21,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static com.ayang818.middleware.tailbase.client.DataStorage.BUCKET_TRACE_LIST;
+import static com.ayang818.middleware.tailbase.client.DataStorage.lockList;
 
 /**
  * @author 杨丰畅
@@ -34,22 +35,29 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static int BUCKET_COUNT = 20;
 
-    private static WebSocket wsClient = WsClient.getWebSocketClient();
+    private static WebSocket wsClient;
 
-    public static  void init() {
+
+    public static void init() {
         for (int i = 0; i < BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new ConcurrentHashMap<>(Constants.BUCKET_SIZE));
+            lockList.add(new Object());
         }
+    }
+
+    public static void strat() {
+        new Thread(new ClientDataStreamHandler(), "ClientDataStreamHandler").start();
     }
 
     @Override
     public void run() {
         try {
+            wsClient = WsClient.getWebSocketClient();
             String path = getPath();
             // process data on client, not server
             if (StringUtils.isEmpty(path)) {
                 logger.warn("path is empty");
-                return ;
+                return;
             }
             URL url = new URL(path);
             logger.info("data path:" + path);
@@ -60,14 +68,22 @@ public class ClientDataStreamHandler implements Runnable {
 
             String line;
             long count = 0;
+            // 第 pos 轮， 不取余
             int pos = 0;
+            // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
+            int bucketPos = 0;
 
             Set<String> tmpBadTraceIdSet = new HashSet<>(1000);
-            Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(pos);
+            Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+
+            Object lock = lockList.get(bucketPos % BUCKET_COUNT);
 
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
                 count++;
+                pos = (int) count / Constants.BUCKET_SIZE;
+                bucketPos = pos % BUCKET_COUNT;
+
                 String[] cols = line.split("\\|");
                 if (cols.length < 9) {
                     logger.info("bad span format");
@@ -85,53 +101,53 @@ public class ClientDataStreamHandler implements Runnable {
 
                 // replace with next bucket
                 if (count % Constants.BUCKET_SIZE == 0) {
-                    pos++;
-                    // loop cycle
-                    if (pos >= BUCKET_COUNT) {
-                        pos = 0;
-                    }
-                    traceMap = BUCKET_TRACE_LIST.get(pos);
+                    traceMap = BUCKET_TRACE_LIST.get(bucketPos);
                     // donot produce data, wait backend to consume data
                     // TODO to use lock/notify
                     while (!traceMap.isEmpty()) {
+                        logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
                         Thread.sleep(10);
                     }
-                    // bucketPos begin from 0, so need to minus 1
-                    int bucketPos = (int) count / Constants.BUCKET_SIZE - 1;
 
-                    updateWrongTraceId(tmpBadTraceIdSet, bucketPos);
+                    //lock.notify();
+                    //lock = lockList.get(bucketPos % BUCKET_COUNT);
+
+                    updateWrongTraceId(tmpBadTraceIdSet, pos);
                 }
             }
             // last update, clear the badTraceIdSet
-            updateWrongTraceId(tmpBadTraceIdSet, (int) (count / Constants.BUCKET_SIZE - 1));
+            updateWrongTraceId(tmpBadTraceIdSet, pos);
+
             bf.close();
             input.close();
             callFinish();
         } catch (Exception e) {
-            logger.warn("fail to process data", e);
+            logger.warn("拉取数据流的过程中产生错误！", e);
         }
 
     }
 
     /**
      * call backend to update the wrongTraceIdList
+     *
      * @param badTraceIdSet
-     * @param bucketPos
+     * @param pos
      */
-    private void updateWrongTraceId(Set<String> badTraceIdSet, int bucketPos) {
+    private void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
         String json = JSON.toJSONString(badTraceIdSet);
         if (badTraceIdSet.size() > 0) {
             // send badTraceIdList and its pos to the backend
-            String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"bucketPos\": %d}"
-                    , Constants.UPDATE_TYPE, json, bucketPos);
+            String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
+                    , Constants.UPDATE_TYPE, json, pos);
             wsClient.sendTextFrame(msg);
         }
         badTraceIdSet.clear();
-        logger.info("success update current badTraceIdSet to the backend....");
+        logger.info("成功更新 badTraceIdList 到后端....");
     }
 
     /**
-     * 给定 区间中的所有错误traceId和便宜量，拉取对应traceIds的spans
+     * 给定 区间中的所有错误traceId和pos，拉取对应traceIds的spans
+     *
      * @param wrongTraceIdList
      * @param bucketPos
      * @return
@@ -139,24 +155,17 @@ public class ClientDataStreamHandler implements Runnable {
     public static String getWrongTracing(List<String> wrongTraceIdList, int bucketPos) {
         // calculate the three continue pos
         int pos = bucketPos % BUCKET_COUNT;
-        int previous = pos - 1;
-        int next = pos + 1;
+        int previous = (bucketPos - 1) % BUCKET_COUNT;
+        int next = (bucketPos + 1) % BUCKET_COUNT;
 
-        if (previous == -1) {
-            previous = BUCKET_COUNT -1;
-        }
-        if (next == BUCKET_COUNT) {
-            next = 0;
-        }
-
+        // a tmp map to collect spans
         Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
         // these traceId data should be collect
 
-        getWrongTraceWithBucketPos(previous, pos, wrongTraceIdList, wrongTraceMap);
-        getWrongTraceWithBucketPos(pos, pos, wrongTraceIdList,  wrongTraceMap);
-        getWrongTraceWithBucketPos(next, pos, wrongTraceIdList, wrongTraceMap);
+        getWrongTraceWithBucketPos(previous, bucketPos, wrongTraceIdList, wrongTraceMap);
+        getWrongTraceWithBucketPos(pos, bucketPos, wrongTraceIdList, wrongTraceMap);
+        getWrongTraceWithBucketPos(next, bucketPos, wrongTraceIdList, wrongTraceMap);
 
-        // TODO to use lock/notify, get the lock of this bucket
         // the previous bucket must have been consumed, so free this bucket
         BUCKET_TRACE_LIST.get(previous).clear();
 
@@ -164,14 +173,14 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     /**
-     * @param bucketPos
      * @param pos
+     * @param bucketPos
      * @param traceIdList
      * @param wrongTraceMap
      */
-    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, List<String> traceIdList, Map<String,List<String>> wrongTraceMap) {
+    private static void getWrongTraceWithBucketPos(int pos, int bucketPos, List<String> traceIdList, Map<String, List<String>> wrongTraceMap) {
         // backend start pull these bucket
-        Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+        Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(pos);
 
         for (String traceId : traceIdList) {
             List<String> spanList = traceMap.get(traceId);
@@ -185,23 +194,26 @@ public class ClientDataStreamHandler implements Runnable {
                 } else {
                     wrongTraceMap.put(traceId, spanList);
                 }
-                logger.info(String.format("getWrongTracing, bucketPos:%d, pos:%d, traceId:%s, " +
-                                "spanListSize:\n %d",
-                        bucketPos, pos,  traceId, spanList.size()));
+                logger.info(String.format("拉取错误链路具体内容, bucketPos: %d, pos: %d, traceId: %s, spanListSize: %d",
+                        pos, bucketPos, traceId, spanList.size()));
             }
         }
     }
 
     private void callFinish() {
-
+        wsClient.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE));
+        logger.info("已发送 FIN 请求");
     }
 
-    private String getPath(){
+    private String getPath() {
         String port = System.getProperty("server.port", "8080");
+        // TODO 生产环境切换
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
-        } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)){
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace1.data";
+            //return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+        } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
+            //return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }

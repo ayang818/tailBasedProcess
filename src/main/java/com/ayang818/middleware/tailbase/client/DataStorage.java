@@ -12,4 +12,5 @@ import java.util.Map;
 public class DataStorage {
     public static List<Map<String, List<String>>> BUCKET_TRACE_LIST = new ArrayList<>();
 
+    public static List<Object> lockList = new ArrayList<>();
 }

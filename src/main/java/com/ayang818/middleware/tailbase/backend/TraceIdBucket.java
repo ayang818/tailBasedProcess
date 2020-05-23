@@ -32,6 +32,13 @@ public class TraceIdBucket {
     }
 
     public synchronized int addProcessCount() {
-        return processCount + 1;
+        processCount += 1;
+        return processCount;
+    }
+
+    public void clear() {
+        bucketPos = 0;
+        processCount = 0;
+        traceIdList.clear();
     }
 }

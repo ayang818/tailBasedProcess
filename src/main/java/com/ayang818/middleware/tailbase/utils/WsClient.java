@@ -24,13 +24,14 @@ public class WsClient {
 
     private static volatile WebSocket webSocketClient;
 
-    static {
+    public static void init() {
         try {
             webSocketClient = client
-                        .prepareGet("ws://localhost:8003/handle")
-                        .setRequestTimeout(10000)
-                                .execute(wsHandler)
-                                .get();
+                    .prepareGet("ws://localhost:8003/handle")
+                    .setRequestTimeout(10000)
+                    .execute(wsHandler)
+                    .get();
+            logger.info("ws长连接建立成功......");
         } catch (InterruptedException | ExecutionException e) {
             e.printStackTrace();
         }

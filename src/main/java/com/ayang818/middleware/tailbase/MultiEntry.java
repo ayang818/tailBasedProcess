@@ -1,8 +1,11 @@
 package com.ayang818.middleware.tailbase;
 
+import com.ayang818.middleware.tailbase.backend.CheckSumService;
+import com.ayang818.middleware.tailbase.backend.MessageHandler;
 import com.ayang818.middleware.tailbase.backend.WSStarter;
 import com.ayang818.middleware.tailbase.client.ClientDataStreamHandler;
 import com.ayang818.middleware.tailbase.utils.BaseUtils;
+import com.ayang818.middleware.tailbase.utils.WsClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
@@ -14,16 +17,20 @@ public class MultiEntry {
     private static final Logger logger = LoggerFactory.getLogger(MultiEntry.class);
 
     public static void main(String[] args) {
+        String port = System.getProperty("server.port", "8080");
         if (BaseUtils.isBackendProcess()) {
-            // BackendController.init();
+            MessageHandler.init();
             // start websocket service
-            WSStarter wsStarter = new WSStarter();
-            wsStarter.run();
+            new WSStarter().run();
+            // start consume thread
+            CheckSumService.start();
+            logger.info("数据后端已在 {} 端口启动......", port);
         }
         if (BaseUtils.isClientProcess()) {
             ClientDataStreamHandler.init();
+            WsClient.init();
+            logger.info("数据客户端已在 {} 端口启动......", port);
         }
-        String port = System.getProperty("server.port", "8080");
         SpringApplication.run(MultiEntry.class,
                 "--server.port=" + port
         );

@@ -1,21 +1,23 @@
 package com.ayang818.middleware.tailbase;
 
+import com.ayang818.middleware.tailbase.client.ClientDataStreamHandler;
 import com.ayang818.middleware.tailbase.utils.BaseUtils;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 /**
  * @author 杨丰畅
  * @description TODO
  * @date 2020/5/22 21:32
  **/
+@RestController
 public class CommonController {
 
     private static Integer DATA_SOURCE_PORT = 0;
 
     public static Integer getDataSourcePort() {
-        // TODO
-        return 8080;
+        return DATA_SOURCE_PORT;
     }
 
     @RequestMapping("/ready")
@@ -28,6 +30,7 @@ public class CommonController {
         DATA_SOURCE_PORT = port;
         if (BaseUtils.isClientProcess()) {
             // start to handle data Stream
+            ClientDataStreamHandler.strat();
         }
         return "suc";
     }

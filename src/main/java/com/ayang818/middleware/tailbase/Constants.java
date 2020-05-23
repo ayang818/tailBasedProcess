@@ -14,7 +14,7 @@ public class Constants {
 
     public static final int UPDATE_TYPE = 0;
     public static final int TRACE_DETAIL = 1;
-
+    public static final int FIN_TYPE = 2;
 
     public static final int PULL_TRACE_DETAIL_TYPE = 0;
 }
