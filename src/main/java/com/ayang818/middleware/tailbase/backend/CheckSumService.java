@@ -44,7 +44,8 @@ public class CheckSumService implements Runnable {
                     }
                 }
                 try {
-                    Thread.sleep(100);
+                    logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......线程休眠1s", prePos);
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     // wait some times
                 }

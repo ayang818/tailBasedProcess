@@ -48,7 +48,7 @@ public class TextFrameHandler {
                                             "\"dataPos\": %d}",
                                     Constants.TRACE_DETAIL, wrongTraceDetails, pos);
                             WsClient.getWebSocketClient().sendTextFrame(msg);
-                            logger.info("成功发送请求拉取的数据......");
+                            logger.info("成功发送pos {} 请求拉取的traceDetail数据......", pos);
                             break;
                         default:
                             break;

@@ -74,7 +74,7 @@ public class ClientDataStreamHandler implements Runnable {
             int bucketPos = 0;
 
             Set<String> tmpBadTraceIdSet = new HashSet<>(1000);
-            Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+            Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
 
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
@@ -90,7 +90,7 @@ public class ClientDataStreamHandler implements Runnable {
                 String traceId = cols[0];
                 String tags = cols[8];
 
-                List<String> spanList = traceMap.computeIfAbsent(traceId, k -> new ArrayList<>());
+                Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
                 spanList.add(line);
 
                 if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
@@ -104,7 +104,7 @@ public class ClientDataStreamHandler implements Runnable {
                     // TODO to use lock/notify
                     while (!traceMap.isEmpty()) {
                         logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
-                        Thread.sleep(10);
+                        Thread.sleep(1000);
                     }
 
                     //lock.notify();
@@ -140,7 +140,7 @@ public class ClientDataStreamHandler implements Runnable {
             wsClient.sendTextFrame(msg);
         }
         badTraceIdSet.clear();
-        logger.info("成功更新 badTraceIdList 到后端....");
+        logger.info("成功 pos {} 更新 badTraceIdList 到后端....", pos);
     }
 
     /**
@@ -159,7 +159,7 @@ public class ClientDataStreamHandler implements Runnable {
         logger.info(String.format("curr: %d, prev: %d, next: %d", curr, prev, next));
 
         // a tmp map to collect spans
-        Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
+        Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
         // these traceId data should be collect
 
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdList, wrongTraceMap);
@@ -178,18 +178,19 @@ public class ClientDataStreamHandler implements Runnable {
      * @param traceIdList
      * @param wrongTraceMap
      */
-    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, List<String> traceIdList, Map<String, List<String>> wrongTraceMap) {
+    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, List<String> traceIdList, Map<String, Set<String>> wrongTraceMap) {
         // backend start pull these bucket
         // 这里 bucketPos 为什么是负数呢
-        Map<String, List<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+        Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
         logger.info("开始扫描bucket, bucketPos: {}, pos: {}", bucketPos, pos);
         for (String traceId : traceIdList) {
-            List<String> spanList = traceMap.get(traceId);
+            // TODO NPE
+            Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
                 // one trace may cross two bucket (e.g bucket size 20000, span1 in line 19999,
                 //span2
                 //in line 20001)
-                List<String> existSpanList = wrongTraceMap.get(traceId);
+                Set<String> existSpanList = wrongTraceMap.get(traceId);
                 if (existSpanList != null) {
                     existSpanList.addAll(spanList);
                 } else {

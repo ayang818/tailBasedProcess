@@ -18,7 +18,7 @@ public class ACKData {
 
     private ConcurrentHashMap<String, List<String>> ackMap = new ConcurrentHashMap<>(32);
 
-    public synchronized int putAll(Map<String, List<String>> map) {
+    public int putAll(Map<String, List<String>> map) {
         for (Map.Entry<String, List<String>> entry : map.entrySet()) {
             List<String> spans = ackMap.get(entry.getKey());
             if (spans == null) {

@@ -57,20 +57,19 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     private static final List<TraceIdBucket> TRACEID_BUCKET_LIST = new ArrayList<>();
 
-
     /**
      * key is pos, value is data
      */
-    private static final Map<Integer, ACKData> ACK_MAP = new ConcurrentHashMap<>(100);
+    private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(100);
 
     private static final AtomicInteger FIN_TIME = new AtomicInteger(0);
+
+    private static final Object LOCK = new Object();
 
     public static void init() {
         for (int i = 0; i < BUCKET_COUNT; i++) {
             TRACEID_BUCKET_LIST.add(new TraceIdBucket());
         }
-
-
     }
 
     @Override
@@ -102,26 +101,37 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     /**
      * 消费从client拉到的traceId以及对应的spans
+     *
      * @param detailMap
      * @param pos
      */
     private void consumeTraceDetails(Map<String, List<String>> detailMap, Integer pos) {
-        ACKData ackData = ACK_MAP.get(pos);
-        if (ackData == null) {
-            ackData = new ACKData();
+        String posStr = String.valueOf(pos);
+        ACKData ackData;
+
+        // 锁住，以免重复检测到未放入，导致脏读
+        synchronized (LOCK) {
+            ackData = ACK_MAP.get(posStr);
+            if (ackData == null) {
+                ackData = new ACKData();
+            }
+            ACK_MAP.put(posStr, ackData);
         }
 
         // 剩余可访问次数
         int remainAccessTime = ackData.putAll(detailMap);
+        logger.info("pos {} 处的数据还可被访问 {} 次", pos, remainAccessTime);
 
         if (remainAccessTime == 0) {
+            logger.info("开始消费 pos {} 处拉到的数据", pos);
 
             Map<String, List<String>> map = ackData.getAckMap();
 
             StringBuilder sb = new StringBuilder();
 
+            // 这里的key时String
             for (Map.Entry<String, List<String>> entry : map.entrySet()) {
-                // TODO 这里记录到的日志有两种问题 1.span重复 2.span缺失 无一例外
+                // TODO 这里记录到的日志有两种问题 1.span重复
                 sb.append("traceId : ").append(entry.getKey()).append("  size : ").append(entry.getValue().size()).append("\n");
 
                 String spans = entry.getValue()
@@ -134,8 +144,10 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 resMap.put(entry.getKey(), md5(spans));
             }
 
+            // 还原 bucketPos 所在bucket为初始状态
             TRACEID_BUCKET_LIST.get(pos % BUCKET_COUNT).clear();
-            logger.info("{} 处的bucket处理完毕，清空此处的 bucket", pos);
+
+            logger.info("{} 处的bucket消费完毕，清空此处的 bucket", pos);
 
             try {
                 Files.write(Paths.get("D:/middlewaredata/my.data"), sb.toString().getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
@@ -143,12 +155,9 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 e.printStackTrace();
             }
 
-            ACK_MAP.remove(pos);
+            ACK_MAP.remove(posStr);
             logger.info("当前检测到 {} 条错误链路", resMap.size());
-            return ;
         }
-
-        ACK_MAP.put(pos, ackData);
     }
 
     /**
