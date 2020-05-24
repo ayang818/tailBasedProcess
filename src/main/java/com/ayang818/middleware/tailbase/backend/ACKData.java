@@ -20,11 +20,12 @@ public class ACKData {
 
     public synchronized int putAll(Map<String, List<String>> map) {
         for (Map.Entry<String, List<String>> entry : map.entrySet()) {
-            ackMap.computeIfPresent(entry.getKey(), (key, val) -> {
-                val.addAll(entry.getValue());
-                return val;
-            });
-            ackMap.putIfAbsent(entry.getKey(), entry.getValue());
+            List<String> spans = ackMap.get(entry.getKey());
+            if (spans == null) {
+                ackMap.put(entry.getKey(), entry.getValue());
+            } else {
+                spans.addAll(entry.getValue());
+            }
         }
         return remainAccessTime.decrementAndGet();
     }
