@@ -3,6 +3,7 @@ package com.ayang818.middleware.tailbase.backend;
 import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.utils.BaseUtils;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import okhttp3.FormBody;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -12,30 +13,40 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
 /**
  * @author 杨丰畅
- * @description TODO
+ * @description 从阻塞队列中获取消费对象，用于向 client 发出拉起数据请求的线程
  * @date 2020/5/22 23:41
  **/
-public class CheckSumService implements Runnable {
+public class PullDataService implements Runnable {
 
-    private static final Logger logger = LoggerFactory.getLogger(CheckSumService.class);
+    private static final Logger logger = LoggerFactory.getLogger(PullDataService.class);
 
     public static Map<String, String> resMap = new ConcurrentHashMap<>();
 
+    public static LinkedBlockingQueue<TraceIdBucket> blockingQueue = new LinkedBlockingQueue<>();
+
     private int prePos = -1;
 
+    private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(10), new DefaultThreadFactory("startPool-backend"));
+
     public static void start() {
-        new Thread(new CheckSumService(), "CheckSumThread").start();
+        START_POOL.execute(new PullDataService());
     }
 
     @Override
     public void run() {
         TraceIdBucket traceIdBucket = null;
         while (true) {
-            TraceIdBucket bucket = MessageHandler.getFinishedBucket(prePos + 1);
+            TraceIdBucket bucket = null;
+            try {
+                bucket = blockingQueue.poll(15, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
             if (bucket == null) {
                 // 考虑是否已经全部消费完了
                 if (MessageHandler.isFin()) {
@@ -43,24 +54,18 @@ public class CheckSumService implements Runnable {
                         break;
                     }
                 }
-                try {
-                    logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......线程休眠1s", prePos);
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    // wait some times
-                }
+                logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......", prePos);
                 continue;
             }
+
             prePos = bucket.getPos();
             // 发送取到的errTraceId 和 对应的 pos
             List<String> traceIdList = bucket.getTraceIdList();
             int pos = bucket.getPos();
 
             if (!traceIdList.isEmpty()) {
-                String traceIdListString = JSON.toJSONString(traceIdList);
                 // pull data from each client, then MessageHandler will consume these data
-                MessageHandler.pullWrongTraceDetails(traceIdListString, pos);
-                bucket.setAsWaiting();
+                MessageHandler.pullWrongTraceDetails(JSON.toJSONString(traceIdList), pos);
             }
         }
     }

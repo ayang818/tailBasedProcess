@@ -1,10 +1,9 @@
 package com.ayang818.middleware.tailbase.client;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.TypeReference;
-import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,14 +17,13 @@ import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
-import static com.ayang818.middleware.tailbase.client.DataStorage.BUCKET_TRACE_LIST;
-import static com.ayang818.middleware.tailbase.client.DataStorage.lockList;
+import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
 /**
  * @author 杨丰畅
- * @description TODO
+ * @description client 端用于处理读入数据流，向 backend 发送对应请求的类
  * @date 2020/5/5 12:47
  **/
 @Service
@@ -37,16 +35,18 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static WebSocket wsClient;
 
+    private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(10), new DefaultThreadFactory("startPool-client"));
 
     public static void init() {
+        threadPool = Executors.newFixedThreadPool(2);
         for (int i = 0; i < BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new ConcurrentHashMap<>(Constants.BUCKET_SIZE));
-            lockList.add(new Object());
         }
     }
 
-    public static void strat() {
-        new Thread(new ClientDataStreamHandler(), "ClientDataStreamHandler").start();
+    public static void start() {
+        START_POOL.execute(new ClientDataStreamHandler());
     }
 
     @Override
@@ -101,10 +101,10 @@ public class ClientDataStreamHandler implements Runnable {
                 if (count % Constants.BUCKET_SIZE == 0) {
                     traceMap = BUCKET_TRACE_LIST.get(bucketPos);
                     // donot produce data, wait backend to consume data
-                    // TODO to use lock/notify
+                    // TODO to use lock/notify 其实这里也可以用producer/consumer优化
                     while (!traceMap.isEmpty()) {
                         logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
-                        Thread.sleep(1000);
+                        Thread.sleep(10);
                     }
 
                     //lock.notify();
@@ -138,9 +138,10 @@ public class ClientDataStreamHandler implements Runnable {
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
                     , Constants.UPDATE_TYPE, json, pos);
             wsClient.sendTextFrame(msg);
+            logger.info("成功上报wrongTraceId...");
         }
+        // 清空2w为区间的set
         badTraceIdSet.clear();
-        logger.info("成功 pos {} 更新 badTraceIdList 到后端....", pos);
     }
 
     /**
@@ -156,12 +157,12 @@ public class ClientDataStreamHandler implements Runnable {
         int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
         int next = (curr + 1 == BUCKET_COUNT) ? 0 : (curr + 1) % BUCKET_COUNT;
 
-        logger.info(String.format("curr: %d, prev: %d, next: %d", curr, prev, next));
+        logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket 中的数据", curr, prev, next));
 
         // a tmp map to collect spans
         Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
-        // these traceId data should be collect
 
+        // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdList, wrongTraceMap);
         getWrongTraceWithBucketPos(curr, pos, wrongTraceIdList, wrongTraceMap);
         getWrongTraceWithBucketPos(next, pos, wrongTraceIdList, wrongTraceMap);
@@ -180,15 +181,12 @@ public class ClientDataStreamHandler implements Runnable {
      */
     private static void getWrongTraceWithBucketPos(int bucketPos, int pos, List<String> traceIdList, Map<String, Set<String>> wrongTraceMap) {
         // backend start pull these bucket
-        // 这里 bucketPos 为什么是负数呢
         Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
-        logger.info("开始扫描bucket, bucketPos: {}, pos: {}", bucketPos, pos);
         for (String traceId : traceIdList) {
-            // TODO NPE
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
                 // one trace may cross two bucket (e.g bucket size 20000, span1 in line 19999,
-                //span2
+                // span2
                 //in line 20001)
                 Set<String> existSpanList = wrongTraceMap.get(traceId);
                 if (existSpanList != null) {
@@ -196,11 +194,10 @@ public class ClientDataStreamHandler implements Runnable {
                 } else {
                     wrongTraceMap.put(traceId, spanList);
                 }
-                logger.info(String.format("拉取错误链路具体内容, bucketPos: %d, pos: %d, traceId: %s, spanListSize: %d",
-                        bucketPos, pos, traceId, spanList.size()));
+                //logger.info(String.format("拉取错误链路具体内容, bucketPos: %d, pos: %d, traceId: %s, spanListSize: %d",
+                //        bucketPos, pos, traceId, spanList.size()));
             }
         }
-        logger.info("======================================");
     }
 
     private void callFinish() {
@@ -210,7 +207,7 @@ public class ClientDataStreamHandler implements Runnable {
 
     private String getPath() {
         String port = System.getProperty("server.port", "8080");
-        // TODO 生产环境切换
+        // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
             return "http://localhost:8080/trace1.data";
             //return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";

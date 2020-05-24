@@ -12,7 +12,7 @@ import static com.ayang818.middleware.tailbase.client.TextFrameHandler.*;
 
 /**
  * @author 杨丰畅
- * @description TODO
+ * @description 建立与 backend 的 websocket 连接
  * @date 2020/5/14 20:19
  **/
 @Component

@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * @author 杨丰畅
- * @description TODO
+ * @description 接收方法类
  * @date 2020/5/22 21:32
  **/
 @RestController
@@ -30,7 +30,7 @@ public class CommonController {
         DATA_SOURCE_PORT = port;
         if (BaseUtils.isClientProcess()) {
             // start to handle data Stream
-            ClientDataStreamHandler.strat();
+            ClientDataStreamHandler.start();
         }
         return "suc";
     }

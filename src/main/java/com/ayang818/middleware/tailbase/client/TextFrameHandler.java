@@ -12,10 +12,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
 /**
  * @author 杨丰畅
- * @description TODO
+ * @description client 端 websocket 信息处理器
  * @date 2020/5/22 21:59
  **/
 public class TextFrameHandler {
@@ -41,14 +42,17 @@ public class TextFrameHandler {
                             List<String> wrongTraceIdList = jsonObject.getObject("traceIdList",
                                     new TypeReference<List<String>>() {});
                             Integer pos = jsonObject.getObject("pos", Integer.class);
-                            String wrongTraceDetails =
-                                    ClientDataStreamHandler.getWrongTracing(wrongTraceIdList,
-                                            pos);
-                            String msg = String.format("{\"type\": %d, \"data\": %s, " +
-                                            "\"dataPos\": %d}",
-                                    Constants.TRACE_DETAIL, wrongTraceDetails, pos);
-                            WsClient.getWebSocketClient().sendTextFrame(msg);
-                            logger.info("成功发送pos {} 请求拉取的traceDetail数据......", pos);
+
+                            threadPool.execute(() -> {
+                                String wrongTraceDetails =
+                                        ClientDataStreamHandler.getWrongTracing(wrongTraceIdList,
+                                                pos);
+                                String msg = String.format("{\"type\": %d, \"data\": %s, " +
+                                                "\"dataPos\": %d}",
+                                        Constants.TRACE_DETAIL, wrongTraceDetails, pos);
+                                WsClient.getWebSocketClient().sendTextFrame(msg);
+                                logger.info("成功发送pos {} 请求拉取的traceDetail数据......", pos);
+                            });
                             break;
                         default:
                             break;

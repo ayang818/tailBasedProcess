@@ -15,25 +15,23 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static com.ayang818.middleware.tailbase.Constants.PROCESS_COUNT;
-import static com.ayang818.middleware.tailbase.backend.CheckSumService.resMap;
+import static com.ayang818.middleware.tailbase.Constants.TARGET_PROCESS_COUNT;
+import static com.ayang818.middleware.tailbase.backend.PullDataService.resMap;
 
 /**
  * @author 杨丰畅
- * @description TODO
+ * @description 处理 websocket 信息
  * @date 2020/5/16 19:39
  **/
 @ChannelHandler.Sharable
@@ -44,16 +42,14 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     private static ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
 
     /**
-     * FINISH_PROCESS_COUNT will add one, when process call finish();
+     * FIN_TIME will add one
      */
-    private static volatile Integer FINISH_PROCESS_COUNT = 0;
+    private static final AtomicInteger FIN_TIME = new AtomicInteger(0);
 
     /**
      * save 90 buckets for wrong trace
      */
     private static final int BUCKET_COUNT = 90;
-
-    private static final int ACK_MAP_COUNT = 45;
 
     private static final List<TraceIdBucket> TRACEID_BUCKET_LIST = new ArrayList<>();
 
@@ -62,11 +58,12 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      */
     private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(100);
 
-    private static final AtomicInteger FIN_TIME = new AtomicInteger(0);
+    private static ExecutorService threadPool;
 
     private static final Object LOCK = new Object();
 
     public static void init() {
+        threadPool = Executors.newFixedThreadPool(4);
         for (int i = 0; i < BUCKET_COUNT; i++) {
             TRACEID_BUCKET_LIST.add(new TraceIdBucket());
         }
@@ -89,7 +86,8 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                     new TypeReference<Map<String, List<String>>>(){});
                 // pull data from this pos, here is for a recent ack!
                 Integer pos = jsonObject.getObject("dataPos", Integer.class);
-                consumeTraceDetails(spans, pos);
+                // 提交到线程池中等待消费
+                threadPool.execute(() -> consumeTraceDetails(spans, pos));
                 break;
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
@@ -127,20 +125,14 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
             Map<String, List<String>> map = ackData.getAckMap();
 
-            StringBuilder sb = new StringBuilder();
-
             // 这里的key时String
             for (Map.Entry<String, List<String>> entry : map.entrySet()) {
-                // TODO 这里记录到的日志有两种问题 1.span重复
-                sb.append("traceId : ").append(entry.getKey()).append("  size : ").append(entry.getValue().size()).append("\n");
-
                 String spans = entry.getValue()
                         .stream()
                         .sorted(Comparator.comparing(MessageHandler::getStartTime))
                         .collect(Collectors.joining("\n"));
                 spans += "\n";
 
-                sb.append(spans);
                 resMap.put(entry.getKey(), md5(spans));
             }
 
@@ -148,12 +140,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             TRACEID_BUCKET_LIST.get(pos % BUCKET_COUNT).clear();
 
             logger.info("{} 处的bucket消费完毕，清空此处的 bucket", pos);
-
-            try {
-                Files.write(Paths.get("D:/middlewaredata/my.data"), sb.toString().getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
 
             ACK_MAP.remove(posStr);
             logger.info("当前检测到 {} 条错误链路", resMap.size());
@@ -188,26 +174,11 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             int processCount = traceIdBucket.addProcessCount();
             traceIdBucket.getTraceIdList().addAll(badTraceIdList);
             logger.info(String.format("%d 位置的 bucket 访问次数到达 %d", bucketPos, processCount));
-        }
-    }
-
-    /**
-     * 获取一个可以被消费的bucket
-     * @param startPos 上一次被消费的bucket所在的位置 + 1，既然上一个位置刚刚被消费，那么下一个位置可以被消费的概率也很大，
-     *                 而且可以及时释放client端对应bucket
-     * @return
-     */
-    public static TraceIdBucket getFinishedBucket(int startPos) {
-        int end = startPos + BUCKET_COUNT;
-        for (int i = startPos; i < end; i++) {
-            int cur = i % BUCKET_COUNT;
-            TraceIdBucket currentBucket = TRACEID_BUCKET_LIST.get(cur);
-
-            if (currentBucket.getProcessCount() >= PROCESS_COUNT && !currentBucket.isWaiting()) {
-                return currentBucket;
+            // 使用阻塞队列优化，如果processCount >= TARGET_PROCESS_COUNT，那么推入消费队列，等待消费
+            if (processCount >= TARGET_PROCESS_COUNT) {
+               PullDataService.blockingQueue.offer(traceIdBucket);
             }
         }
-        return null;
     }
 
     /**
@@ -216,7 +187,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      */
     public static boolean isFin() {
         // 是否收到对应次FIN信号
-        if (FIN_TIME.get() < PROCESS_COUNT) return false;
+        if (FIN_TIME.get() < TARGET_PROCESS_COUNT) return false;
         // bucket中元素是否消费完
         for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
             if (traceIdBucket.getPos() != 0) {
@@ -224,39 +195,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             }
         }
         return true;
-    }
-
-    /**
-     * 消费剩下的bucket
-     */
-    @Deprecated
-    public static void consumeRemainBucket() {
-        for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
-            logger.info("开始拉取最后剩余的数据......");
-            int i = 0;
-            boolean flag = false;
-            while (traceIdBucket.getProcessCount() < PROCESS_COUNT && i < 5) {
-                // 重试5次
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                i++;
-                if (i == 4) {
-                   flag = true;
-                   traceIdBucket.clear();
-                }
-            }
-            if (flag) continue;
-
-            // 访问次数达到了请求client数据来消费
-            String traceIdListString = JSON.toJSONString(traceIdBucket.getTraceIdList());
-            int bucketPos = traceIdBucket.getPos();
-            String msg = String.format("{\"type\": %d, \"traceIdList\": %s, \"bucketPos\": %d}",
-                    Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, bucketPos);
-            channels.writeAndFlush(new TextWebSocketFrame(msg));
-        }
     }
 
     public static long getStartTime(String span) {
@@ -305,6 +243,59 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             return new String(str);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * 获取一个可以被消费的bucket
+     * @param startPos 上一次被消费的bucket所在的位置 + 1，既然上一个位置刚刚被消费，那么下一个位置可以被消费的概率也很大，
+     *                 而且可以及时释放client端对应bucket
+     * @return
+     */
+    @Deprecated
+    public static TraceIdBucket getFinishedBucket(int startPos) {
+        int end = startPos + BUCKET_COUNT;
+        for (int i = startPos; i < end; i++) {
+            int cur = i % BUCKET_COUNT;
+            TraceIdBucket currentBucket = TRACEID_BUCKET_LIST.get(cur);
+
+            if (currentBucket.getProcessCount() >= TARGET_PROCESS_COUNT) {
+                return currentBucket;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 消费剩下的bucket
+     */
+    @Deprecated
+    public static void consumeRemainBucket() {
+        for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
+            logger.info("开始拉取最后剩余的数据......");
+            int i = 0;
+            boolean flag = false;
+            while (traceIdBucket.getProcessCount() < TARGET_PROCESS_COUNT && i < 5) {
+                // 重试5次
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                i++;
+                if (i == 4) {
+                    flag = true;
+                    traceIdBucket.clear();
+                }
+            }
+            if (flag) continue;
+
+            // 访问次数达到了请求client数据来消费
+            String traceIdListString = JSON.toJSONString(traceIdBucket.getTraceIdList());
+            int bucketPos = traceIdBucket.getPos();
+            String msg = String.format("{\"type\": %d, \"traceIdList\": %s, \"bucketPos\": %d}",
+                    Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, bucketPos);
+            channels.writeAndFlush(new TextWebSocketFrame(msg));
         }
     }
 

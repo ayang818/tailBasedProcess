@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * @author 杨丰畅
- * @description TODO
+ * @description 超时心跳检测
  * @date 2020/5/16 19:42
  **/
 @ChannelHandler.Sharable

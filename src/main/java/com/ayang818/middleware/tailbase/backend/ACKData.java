@@ -2,7 +2,6 @@ package com.ayang818.middleware.tailbase.backend;
 
 import com.ayang818.middleware.tailbase.Constants;
 
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @date 2020/5/23 14:17
  **/
 public class ACKData {
-    private AtomicInteger remainAccessTime = new AtomicInteger(Constants.PROCESS_COUNT);
+    private AtomicInteger remainAccessTime = new AtomicInteger(Constants.TARGET_PROCESS_COUNT);
 
     private ConcurrentHashMap<String, List<String>> ackMap = new ConcurrentHashMap<>(32);
 
@@ -44,6 +43,6 @@ public class ACKData {
 
     public void clear() {
         ackMap.clear();
-        remainAccessTime.set(Constants.PROCESS_COUNT);
+        remainAccessTime.set(Constants.TARGET_PROCESS_COUNT);
     }
 }

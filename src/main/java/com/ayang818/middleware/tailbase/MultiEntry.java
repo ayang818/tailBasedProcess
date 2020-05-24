@@ -1,6 +1,6 @@
 package com.ayang818.middleware.tailbase;
 
-import com.ayang818.middleware.tailbase.backend.CheckSumService;
+import com.ayang818.middleware.tailbase.backend.PullDataService;
 import com.ayang818.middleware.tailbase.backend.MessageHandler;
 import com.ayang818.middleware.tailbase.backend.WSStarter;
 import com.ayang818.middleware.tailbase.client.ClientDataStreamHandler;
@@ -23,7 +23,7 @@ public class MultiEntry {
             // start websocket service
             new WSStarter().run();
             // start consume thread
-            CheckSumService.start();
+            PullDataService.start();
             logger.info("数据后端已在 {} 端口启动......", port);
         }
         if (BaseUtils.isClientProcess()) {
