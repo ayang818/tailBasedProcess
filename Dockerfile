@@ -11,4 +11,4 @@ WORKDIR $HOME
 
 RUN chmod +x $HOME/start.sh
 
-ENTRYPOINT ["/bin/bash", "$HOME/start.sh"]
+ENTRYPOINT ["/bin/bash", "/usr/local/src/start.sh"]
