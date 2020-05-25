@@ -43,7 +43,7 @@ public class PullDataService implements Runnable {
         while (true) {
             TraceIdBucket bucket = null;
             try {
-                bucket = blockingQueue.poll(15, TimeUnit.MILLISECONDS);
+                bucket = blockingQueue.poll(100, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -54,7 +54,7 @@ public class PullDataService implements Runnable {
                         break;
                     }
                 }
-                logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......", prePos);
+                // logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......", prePos);
                 continue;
             }
 

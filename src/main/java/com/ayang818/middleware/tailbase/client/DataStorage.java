@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
 
 /**
  * @author 杨丰畅
@@ -13,6 +12,4 @@ import java.util.concurrent.ExecutorService;
  **/
 public class DataStorage {
     public static List<Map<String, Set<String>>> BUCKET_TRACE_LIST = new ArrayList<>();
-
-    public static ExecutorService threadPool;
 }

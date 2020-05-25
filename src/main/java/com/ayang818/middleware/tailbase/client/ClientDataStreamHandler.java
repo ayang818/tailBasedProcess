@@ -39,7 +39,6 @@ public class ClientDataStreamHandler implements Runnable {
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("startPool-client"));
 
     public static void init() {
-        threadPool = Executors.newFixedThreadPool(2);
         for (int i = 0; i < BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new ConcurrentHashMap<>(Constants.BUCKET_SIZE));
         }
@@ -104,7 +103,7 @@ public class ClientDataStreamHandler implements Runnable {
                     // TODO to use lock/notify 其实这里也可以用producer/consumer优化
                     while (!traceMap.isEmpty()) {
                         logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
-                        Thread.sleep(10);
+                        Thread.sleep(100);
                     }
 
                     //lock.notify();
@@ -145,7 +144,7 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     /**
-     * 给定 区间中的所有错误traceId和pos，拉取对应traceIds的spans
+     * 给定区间中的所有错误traceId和pos，拉取对应traceIds的spans
      *
      * @param wrongTraceIdList
      * @param pos
@@ -160,7 +159,7 @@ public class ClientDataStreamHandler implements Runnable {
         logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket 中的数据", curr, prev, next));
 
         // a tmp map to collect spans
-        Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
+        Map<String, Set<String>> wrongTraceMap = new ConcurrentHashMap<>(32);
 
         // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdList, wrongTraceMap);
@@ -182,6 +181,8 @@ public class ClientDataStreamHandler implements Runnable {
     private static void getWrongTraceWithBucketPos(int bucketPos, int pos, List<String> traceIdList, Map<String, Set<String>> wrongTraceMap) {
         // backend start pull these bucket
         Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+        // TODO 这里为什么会出现NPE呢？
+        if (traceMap == null) return ;
         for (String traceId : traceIdList) {
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {

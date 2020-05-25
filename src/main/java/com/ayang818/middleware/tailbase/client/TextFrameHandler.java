@@ -12,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
 /**
  * @author 杨丰畅
@@ -35,6 +34,7 @@ public class TextFrameHandler {
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
                     JSONObject jsonObject = JSON.parseObject(payload);
                     int type = jsonObject.getObject("type", Integer.class);
+                    // 查看延迟
                     logger.info("收到backend发送的消息......");
                     switch (type) {
                         case Constants.PULL_TRACE_DETAIL_TYPE:
@@ -42,17 +42,14 @@ public class TextFrameHandler {
                             List<String> wrongTraceIdList = jsonObject.getObject("traceIdList",
                                     new TypeReference<List<String>>() {});
                             Integer pos = jsonObject.getObject("pos", Integer.class);
-
-                            threadPool.execute(() -> {
-                                String wrongTraceDetails =
-                                        ClientDataStreamHandler.getWrongTracing(wrongTraceIdList,
-                                                pos);
-                                String msg = String.format("{\"type\": %d, \"data\": %s, " +
-                                                "\"dataPos\": %d}",
-                                        Constants.TRACE_DETAIL, wrongTraceDetails, pos);
-                                WsClient.getWebSocketClient().sendTextFrame(msg);
-                                logger.info("成功发送pos {} 请求拉取的traceDetail数据......", pos);
-                            });
+                            String wrongTraceDetails =
+                                    ClientDataStreamHandler.getWrongTracing(wrongTraceIdList,
+                                            pos);
+                            String msg = String.format("{\"type\": %d, \"data\": %s, " +
+                                            "\"dataPos\": %d}",
+                                    Constants.TRACE_DETAIL, wrongTraceDetails, pos);
+                            WsClient.getWebSocketClient().sendTextFrame(msg);
+                            logger.info("成功发送pos {} 请求拉取的traceDetail数据......", pos);
                             break;
                         default:
                             break;

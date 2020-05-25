@@ -30,11 +30,11 @@ public class WSStarter {
     public static MessageHandler messageHandler;
 
     public void run() {
-        EventLoopGroup bossGroup = new NioEventLoopGroup();
-        EventLoopGroup slaveGroup = new NioEventLoopGroup();
+        EventLoopGroup bossGroup = new NioEventLoopGroup(4);
+        EventLoopGroup workerGroup = new NioEventLoopGroup(4);
 
         ServerBootstrap server = new ServerBootstrap();
-        server.group(bossGroup, slaveGroup)
+        server.group(bossGroup, workerGroup)
                 .channel(NioServerSocketChannel.class)
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
@@ -48,7 +48,7 @@ public class WSStarter {
                         pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null, false, 409600));
                         MessageHandler.init();
                         messageHandler = new MessageHandler();
-                        pipeline.addLast(messageHandler);
+                        pipeline.addLast(new NioEventLoopGroup(4), messageHandler);
 
                         // 60s 无读写，断开链接
                         pipeline.addLast(new IdleStateHandler(0, 0, 60));
