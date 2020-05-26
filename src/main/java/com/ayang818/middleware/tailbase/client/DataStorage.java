@@ -12,4 +12,8 @@ import java.util.Set;
  **/
 public class DataStorage {
     public static List<Map<String, Set<String>>> BUCKET_TRACE_LIST = new ArrayList<>();
+
+    public static int CACHED_RECORDS_SIZE = 2000000;
+
+    public static List<String> CACHED_RECORDS = new ArrayList<>(CACHED_RECORDS_SIZE);
 }
