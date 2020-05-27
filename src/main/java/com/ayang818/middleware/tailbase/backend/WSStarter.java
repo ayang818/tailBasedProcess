@@ -46,7 +46,6 @@ public class WSStarter {
                         pipeline.addLast(new HttpObjectAggregator( 100 * 1024 * 1024, false));
 
                         pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null, false, 409600));
-                        MessageHandler.init();
                         messageHandler = new MessageHandler();
                         pipeline.addLast(new NioEventLoopGroup(4), messageHandler);
 

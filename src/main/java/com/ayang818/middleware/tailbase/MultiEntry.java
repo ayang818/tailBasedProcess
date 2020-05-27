@@ -1,11 +1,10 @@
 package com.ayang818.middleware.tailbase;
 
-import com.ayang818.middleware.tailbase.backend.PullDataService;
 import com.ayang818.middleware.tailbase.backend.MessageHandler;
+import com.ayang818.middleware.tailbase.backend.PullDataService;
 import com.ayang818.middleware.tailbase.backend.WSStarter;
 import com.ayang818.middleware.tailbase.client.ClientDataStreamHandler;
 import com.ayang818.middleware.tailbase.utils.BaseUtils;
-import com.ayang818.middleware.tailbase.utils.WsClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
@@ -28,7 +27,6 @@ public class MultiEntry {
         }
         if (BaseUtils.isClientProcess()) {
             ClientDataStreamHandler.init();
-            WsClient.init();
             logger.info("数据客户端已在 {} 端口启动......", port);
         }
         SpringApplication.run(MultiEntry.class,

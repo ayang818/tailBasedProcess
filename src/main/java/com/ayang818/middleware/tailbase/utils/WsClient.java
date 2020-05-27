@@ -24,34 +24,29 @@ public class WsClient {
 
     private static final Logger logger = LoggerFactory.getLogger(WsClient.class);
 
-
-
-
-        private static DefaultAsyncHttpClientConfig config =
-                Dsl.config()
-                        .setWebSocketMaxFrameSize(204800)
-                        .setEventLoopGroup(new NioEventLoopGroup(8, new DefaultThreadFactory(
-                                "async-http-threadPool")))
-                        .build();
-        private static AsyncHttpClient client = Dsl.asyncHttpClient(config);
-
+    private static DefaultAsyncHttpClientConfig config =
+            Dsl.config()
+                    .setWebSocketMaxFrameSize(204800)
+                    .setEventLoopGroup(new NioEventLoopGroup(4, new DefaultThreadFactory(
+                            "async-http-threadPool")))
+                    .build();
+    private static AsyncHttpClient client = Dsl.asyncHttpClient(config);
 
     private static volatile WebSocket webSocketClient;
 
-    public static void init() {
-        try {
-            webSocketClient = client
-                    .prepareGet("ws://localhost:8003/handle")
-                    .setRequestTimeout(10000)
-                    .execute(wsHandler)
-                    .get();
-            logger.info("ws长连接建立成功......");
-        } catch (InterruptedException | ExecutionException e) {
-            e.printStackTrace();
-        }
-    }
-
     public static WebSocket getWebSocketClient() {
+        if (webSocketClient == null) {
+            try {
+                webSocketClient = client
+                        .prepareGet("ws://localhost:8003/handle")
+                        .setRequestTimeout(10000)
+                        .execute(wsHandler)
+                        .get();
+                logger.info("ws长连接建立成功......");
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
+            }
+        }
         return webSocketClient;
     }
 
