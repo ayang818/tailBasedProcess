@@ -99,18 +99,23 @@ public class ClientDataStreamHandler implements Runnable {
 
                 // replace with next bucket
                 if (count % Constants.BUCKET_SIZE == 0) {
+                    // 更新wrongTraceId到backend
+                    updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
+
                     traceMap = BUCKET_TRACE_LIST.get(bucketPos);
                     // donot produce data, wait backend to consume data
                     // TODO to use lock/notify 其实这里也可以用producer/consumer优化
+
+                    int times = 0;
                     while (!traceMap.isEmpty()) {
                         logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
-                        Thread.sleep(100);
+                        Thread.sleep(1000);
+                        times += 1;
+                        // 要是重试超过20次(20s)，直接结束
+                        if (times >= 20) {
+                            callFinish();
+                        }
                     }
-
-                    //lock.notify();
-                    //lock = lockList.get(bucketPos % BUCKET_COUNT);
-                    // 这里应该是前一个pos才对
-                    updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
                 }
             }
             // last update, clear the badTraceIdSet
@@ -183,7 +188,7 @@ public class ClientDataStreamHandler implements Runnable {
         // backend start pull these bucket
         Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
         // TODO 这里为什么会出现NPE呢？
-        if (traceMap == null) return ;
+        if (traceMap == null) return;
         for (String traceId : traceIdList) {
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {

@@ -58,12 +58,9 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      */
     private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(100);
 
-    private static ExecutorService threadPool;
-
     private static final Object LOCK = new Object();
 
     public static void init() {
-        threadPool = Executors.newFixedThreadPool(4);
         for (int i = 0; i < BUCKET_COUNT; i++) {
             TRACEID_BUCKET_LIST.add(new TraceIdBucket());
         }
@@ -74,25 +71,24 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         String text = msg.text();
         JSONObject jsonObject = JSON.parseObject(text);
         Integer type = jsonObject.getObject("type", Integer.class);
-        Long time = jsonObject.getObject("t", Long.class);
 
         switch (type) {
             case Constants.UPDATE_TYPE:
-                logger.info("收到client的update");
                 List<String> badTraceIdList = jsonObject.getObject("badTraceIdSet", new TypeReference<List<String>>() {});
-                int bucketPos = jsonObject.getObject("pos", Integer.class);
-                setWrongTraceId(badTraceIdList, bucketPos);
+                int pos = jsonObject.getObject("pos", Integer.class);
+                logger.info("收到client pos {} 的update", pos);
+                setWrongTraceId(badTraceIdList, pos);
                 break;
             case Constants.TRACE_DETAIL:
                 logger.info("收到client的traceDetail");
                 Map<String, List<String>> spans = jsonObject.getObject("data",
                     new TypeReference<Map<String, List<String>>>(){});
                 // pull data from this pos, here is for a recent ack!
-                Integer pos = jsonObject.getObject("dataPos", Integer.class);
+                int dataPos = jsonObject.getObject("dataPos", Integer.class);
                 // 提交到线程池中等待消费
                 // threadPool.execute(() -> consumeTraceDetails(spans, pos));
 
-                consumeTraceDetails(spans, pos);
+                consumeTraceDetails(spans, dataPos);
                 break;
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);

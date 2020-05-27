@@ -37,13 +37,16 @@ public class PullDataService implements Runnable {
         START_POOL.execute(new PullDataService());
     }
 
+    private static int timer = 0;
+
     @Override
     public void run() {
         TraceIdBucket traceIdBucket = null;
         while (true) {
             TraceIdBucket bucket = null;
             try {
-                bucket = blockingQueue.poll(100, TimeUnit.MILLISECONDS);
+                // 0.5 秒没有得到新的可以消费的数据，检查是否结束
+                bucket = blockingQueue.poll(500, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -54,10 +57,16 @@ public class PullDataService implements Runnable {
                         break;
                     }
                 }
-                // logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......", prePos);
+                timer += 1;
+                if (timer >= 100) {
+                    // 如果重试次数超过100次，结束评测，免得等很长时间
+                    sendCheckSum();
+                }
+                logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......", prePos);
                 continue;
             }
-
+            // 获取到了bucket，timer置为0
+            timer = 0;
             prePos = bucket.getPos();
             // 发送取到的errTraceId 和 对应的 pos
             List<String> traceIdList = bucket.getTraceIdList();
@@ -69,6 +78,7 @@ public class PullDataService implements Runnable {
             }
         }
     }
+
     public static boolean sendCheckSum() {
         try {
             String result = JSON.toJSONString(resMap);

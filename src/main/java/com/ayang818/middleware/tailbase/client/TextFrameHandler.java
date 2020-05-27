@@ -34,7 +34,7 @@ public class TextFrameHandler {
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
                     JSONObject jsonObject = JSON.parseObject(payload);
                     int type = jsonObject.getObject("type", Integer.class);
-                    // 查看延迟
+
                     logger.info("收到backend发送的消息......");
                     switch (type) {
                         case Constants.PULL_TRACE_DETAIL_TYPE:
