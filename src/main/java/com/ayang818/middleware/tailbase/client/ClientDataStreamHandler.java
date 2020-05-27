@@ -38,27 +38,6 @@ public class ClientDataStreamHandler implements Runnable {
     private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("startPool-client"));
 
-    /**
-     * 行号
-     */
-    long count = 0;
-    /**
-     * 第 pos 轮，不取余
-     */
-    int pos = 0;
-    /**
-     * bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
-     */
-    int bucketPos = 0;
-    /**
-     * 一个bucket中的元素
-     */
-    Map<String, Set<String>> traceMap;
-    /**
-     * 临时traceId缓存，用于每轮的记录
-     */
-    Set<String> tmpBadTraceIdSet;
-
     public static void init() {
         for (int i = 0; i < BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new ConcurrentHashMap<>(Constants.BUCKET_SIZE));
@@ -87,27 +66,52 @@ public class ClientDataStreamHandler implements Runnable {
             BufferedReader bf = new BufferedReader(new InputStreamReader(input));
 
             String line;
+            long count = 0;
+            // 第 pos 轮， 不取余
+            int pos = 0;
+            // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
+            int bucketPos = 0;
 
-            tmpBadTraceIdSet = new HashSet<>(1000);
-            traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+            Set<String> tmpBadTraceIdSet = new HashSet<>(1000);
+            Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
 
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
-                if (CACHED_RECORDS.size() < CACHED_RECORDS_SIZE) {
-                    CACHED_RECORDS.add(line);
-                    if (CACHED_RECORDS.size() == CACHED_RECORDS_SIZE) {
-                        for (String cachedRecord : CACHED_RECORDS) {
-                            handleLine(cachedRecord);
-                        }
-                        CACHED_RECORDS.clear();
+                count++;
+                pos = (int) count / Constants.BUCKET_SIZE;
+                bucketPos = pos % BUCKET_COUNT;
+
+                String[] cols = line.split("\\|");
+                if (cols.length < 9) {
+                    logger.info("bad span format");
+                    continue;
+                }
+                String traceId = cols[0];
+                String tags = cols[8];
+
+                Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
+                spanList.add(line);
+
+                if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
+                    tmpBadTraceIdSet.add(traceId);
+                }
+
+                // replace with next bucket
+                if (count % Constants.BUCKET_SIZE == 0) {
+                    traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+                    // donot produce data, wait backend to consume data
+                    // TODO to use lock/notify 其实这里也可以用producer/consumer优化
+                    while (!traceMap.isEmpty()) {
+                        logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
+                        Thread.sleep(100);
                     }
+
+                    //lock.notify();
+                    //lock = lockList.get(bucketPos % BUCKET_COUNT);
+                    // 这里应该是前一个pos才对
+                    updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
                 }
             }
-            // 清空最后一组数据
-            for (String cachedRecord : CACHED_RECORDS) {
-                handleLine(cachedRecord);
-            }
-            CACHED_RECORDS.clear();
             // last update, clear the badTraceIdSet
             updateWrongTraceId(tmpBadTraceIdSet, pos);
 
@@ -118,43 +122,6 @@ public class ClientDataStreamHandler implements Runnable {
             logger.warn("拉取数据流的过程中产生错误！", e);
         }
 
-    }
-
-    private void handleLine(String line) throws InterruptedException {
-        count++;
-        pos = (int) count / Constants.BUCKET_SIZE;
-        bucketPos = pos % BUCKET_COUNT;
-
-        String[] cols = line.split("\\|");
-        if (cols.length < 9) {
-            logger.info("bad span format");
-            return ;
-        }
-        String traceId = cols[0];
-        String tags = cols[8];
-
-        Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
-        spanList.add(line);
-
-        if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
-            tmpBadTraceIdSet.add(traceId);
-        }
-
-        // replace with next bucket
-        if (count % Constants.BUCKET_SIZE == 0) {
-            traceMap = BUCKET_TRACE_LIST.get(bucketPos);
-            // donot produce data, wait backend to consume data
-            // TODO to use lock/notify 其实这里也可以用producer/consumer优化
-            while (!traceMap.isEmpty()) {
-                logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
-                Thread.sleep(100);
-            }
-
-            //lock.notify();
-            //lock = lockList.get(bucketPos % BUCKET_COUNT);
-            // 这里应该是前一个pos才对
-            updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
-        }
     }
 
     /**
