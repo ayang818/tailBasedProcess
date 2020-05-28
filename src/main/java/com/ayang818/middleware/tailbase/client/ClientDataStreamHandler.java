@@ -207,9 +207,9 @@ public class ClientDataStreamHandler implements Runnable {
         HashMap<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
         // these traceId data should be collect
-        getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
-        getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap);
-        getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
+        //getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
+        //getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap);
+        //getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
 
         // the previous bucket must have been consumed, so free this bucket
         Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
@@ -229,7 +229,7 @@ public class ClientDataStreamHandler implements Runnable {
             Set<String>> wrongTraceMap) {
         // backend start pull these bucket
         Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
-        // TODO 这里为什么会出现NPE呢？
+        // 这里为什么会出现NPE呢？fixed
         for (String traceId : traceIdSet) {
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
@@ -256,9 +256,9 @@ public class ClientDataStreamHandler implements Runnable {
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
             //return "http://localhost:8080/trace1.data";
-             return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-             return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
             //return "http://localhost:8080/trace2.data";
         } else {
             return null;
