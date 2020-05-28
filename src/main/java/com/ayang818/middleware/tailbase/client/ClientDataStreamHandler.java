@@ -36,8 +36,14 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static WebSocket wsClient;
 
-    private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
+    private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60,
+            TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("startPool-client"));
+
+    private static final ExecutorService HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
+            TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(10000), new DefaultThreadFactory("handleLine-threadPool"),
+            new ThreadPoolExecutor.CallerRunsPolicy());
 
     public static void init() {
         for (int i = 0; i < BUCKET_COUNT; i++) {
@@ -47,6 +53,47 @@ public class ClientDataStreamHandler implements Runnable {
 
     public static void start() {
         START_POOL.execute(new ClientDataStreamHandler());
+    }
+
+    private class Worker implements Runnable {
+        private String line;
+        private long count;
+        private int pos;
+        private Set<String> tmpBadTraceIdSet;
+        private Map<String, Set<String>> traceMap;
+
+        public Worker(final String line, final long count, final int pos,
+                      final Set<String> tmpBadTraceIdSet, final Map<String, Set<String>> traceMap) {
+            this.line = line;
+            this.count = count;
+            this.pos = pos;
+            this.tmpBadTraceIdSet = tmpBadTraceIdSet;
+            this.traceMap = traceMap;
+        }
+
+        @Override
+        public void run() {
+            String[] cols = line.split("\\|");
+            if (cols.length < 9) {
+                logger.info("bad span format");
+                return;
+            }
+            String traceId = cols[0];
+            String tags = cols[8];
+
+            Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
+            spanList.add(line);
+
+            if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
+                tmpBadTraceIdSet.add(traceId);
+            }
+
+            if (count % Constants.BUCKET_SIZE == 0) {
+                logger.info("上报 pos {} 的wrongTraceId到backend", pos - 1);
+                // 更新wrongTraceId到backend
+                updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
+            }
+        }
     }
 
     @Override
@@ -62,11 +109,13 @@ public class ClientDataStreamHandler implements Runnable {
             URL url = new URL(path);
             logger.info("data path:" + path);
             // fetch the data source
-            HttpURLConnection httpConnection = (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
+            HttpURLConnection httpConnection =
+                    (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
             InputStream input = httpConnection.getInputStream();
             BufferedReader bf = new BufferedReader(new InputStreamReader(input));
 
             String line;
+
             long count = 0;
             // 第 pos 轮， 不取余
             int pos = 0;
@@ -78,44 +127,45 @@ public class ClientDataStreamHandler implements Runnable {
 
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
-                count++;
+                count += 1;
                 pos = (int) count / Constants.BUCKET_SIZE;
                 bucketPos = pos % BUCKET_COUNT;
 
-                String[] cols = line.split("\\|");
-                if (cols.length < 9) {
-                    logger.info("bad span format");
-                    continue;
-                }
-                String traceId = cols[0];
-                String tags = cols[8];
+                HANDLER_THREAD_POOL.execute(new Worker(line, count, pos,
+                        tmpBadTraceIdSet, traceMap));
 
-                Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
-                spanList.add(line);
-
-                if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
-                    tmpBadTraceIdSet.add(traceId);
-                }
-
-                // replace with next bucket
                 if (count % Constants.BUCKET_SIZE == 0) {
-                    // 更新wrongTraceId到backend
-                    updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
-
+                    // 切换成下一个bucket
                     traceMap = BUCKET_TRACE_LIST.get(bucketPos);
-                    // donot produce data, wait backend to consume data
-
-                    // TODO to use lock/notify 其实这里也可以用producer/consumer优化，但是感觉这里好像触及不到性能瓶颈
+                    // TODO 其实这里也可以用producer/consumer优化，但是这里好像触及不到性能瓶颈
                     int retryTimes = 0;
+                    while (!tmpBadTraceIdSet.isEmpty()) {
+                        try {
+                            Thread.sleep(10);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
                     while (!traceMap.isEmpty()) {
                         logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
-                        Thread.sleep(1000);
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
                         retryTimes += 1;
                         // 要是重试超过20次(20s)，直接结束
                         if (retryTimes >= 20) {
                             callFinish();
                         }
                     }
+                    // int idx = 0;
+                    // logger.info("=========================");
+                    // for (Map<String, Set<String>> stringSetMap : BUCKET_TRACE_LIST) {
+                    //     logger.info("idx {} map中大小为{}", idx, stringSetMap.size());
+                    //     idx += 1;
+                    // }
+                    // logger.info("=========================");
                 }
             }
             // last update, clear the badTraceIdSet
@@ -162,7 +212,8 @@ public class ClientDataStreamHandler implements Runnable {
         int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
         int next = (curr + 1 == BUCKET_COUNT) ? 0 : (curr + 1) % BUCKET_COUNT;
 
-        logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket 中的数据", curr, prev, next));
+        logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket " +
+                "中的数据", curr, prev, next));
 
         // a tmp map to collect spans
         Map<String, Set<String>> wrongTraceMap = new ConcurrentHashMap<>(32);
@@ -184,12 +235,14 @@ public class ClientDataStreamHandler implements Runnable {
      * @param traceIdList
      * @param wrongTraceMap
      */
-    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, List<String> traceIdList, Map<String, Set<String>> wrongTraceMap) {
+    private static void getWrongTraceWithBucketPos(int bucketPos, int pos,
+                                                   List<String> traceIdList, Map<String,
+            Set<String>> wrongTraceMap) {
         // backend start pull these bucket
         Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
         // TODO 这里为什么会出现NPE呢？
         if (traceMap == null) {
-            return ;
+            return;
         }
         for (String traceId : traceIdList) {
             Set<String> spanList = traceMap.get(traceId);
@@ -216,11 +269,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            // return "http://localhost:8080/trace1.data";
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            // return "http://localhost:8080/trace2.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
