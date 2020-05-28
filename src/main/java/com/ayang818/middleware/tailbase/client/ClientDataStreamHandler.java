@@ -5,7 +5,6 @@ import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import org.apache.commons.io.IOUtils;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,10 +17,13 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 
-import static com.ayang818.middleware.tailbase.client.DataStorage.*;
+import static com.ayang818.middleware.tailbase.client.DataStorage.BUCKET_TRACE_LIST;
 
 /**
  * @author 杨丰畅
@@ -60,11 +62,11 @@ public class ClientDataStreamHandler implements Runnable {
         private String line;
         private long count;
         private int pos;
-        private Set<String> tmpBadTraceIdSet;
-        private Map<String, Set<String>> traceMap;
+        private HashSet<String> tmpBadTraceIdSet;
+        private Map<String, HashSet<String>> traceMap;
 
         public Worker(final String line, final long count, final int pos,
-                      final Set<String> tmpBadTraceIdSet, final Map<String, Set<String>> traceMap) {
+                      final HashSet<String> tmpBadTraceIdSet, final Map<String, HashSet<String>> traceMap) {
             this.line = line;
             this.count = count;
             this.pos = pos;
@@ -124,8 +126,8 @@ public class ClientDataStreamHandler implements Runnable {
             // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
             int bucketPos = 0;
 
-            Set<String> tmpBadTraceIdSet = new HashSet<>(500);
-            Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+            HashSet<String> tmpBadTraceIdSet = new HashSet<>(500);
+            Map<String, HashSet<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
 
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
@@ -175,8 +177,9 @@ public class ClientDataStreamHandler implements Runnable {
      * @param badTraceIdSet
      * @param pos
      */
-    private void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
-        String json = JSON.toJSONString(badTraceIdSet);
+    private void updateWrongTraceId(HashSet<String> badTraceIdSet, int pos) {
+        // TODO ConcurrentModificationException
+        String json = JSON.toJSONString(badTraceIdSet.clone());
         if (badTraceIdSet.size() > 0) {
             // send badTraceIdList and its pos to the backend
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
@@ -207,15 +210,15 @@ public class ClientDataStreamHandler implements Runnable {
         HashMap<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
         // these traceId data should be collect
-        //getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
-        //getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap);
-        //getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
+        getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
+        getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap);
+        getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
 
         // the previous bucket must have been consumed, so free this bucket
-        Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
+        Map<String, HashSet<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
         traceBucket.clear();
 
-        return JSON.toJSONString(wrongTraceMap);
+        return JSON.toJSONString(wrongTraceMap.clone());
     }
 
     /**
@@ -228,7 +231,7 @@ public class ClientDataStreamHandler implements Runnable {
                                                    Set<String> traceIdSet, Map<String,
             Set<String>> wrongTraceMap) {
         // backend start pull these bucket
-        Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+        Map<String, HashSet<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
         // 这里为什么会出现NPE呢？fixed
         for (String traceId : traceIdSet) {
             Set<String> spanList = traceMap.get(traceId);
