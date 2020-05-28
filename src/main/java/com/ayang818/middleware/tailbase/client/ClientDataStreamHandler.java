@@ -104,15 +104,15 @@ public class ClientDataStreamHandler implements Runnable {
 
                     traceMap = BUCKET_TRACE_LIST.get(bucketPos);
                     // donot produce data, wait backend to consume data
-                    // TODO to use lock/notify 其实这里也可以用producer/consumer优化
 
-                    int times = 0;
+                    // TODO to use lock/notify 其实这里也可以用producer/consumer优化，但是感觉这里好像触及不到性能瓶颈
+                    int retryTimes = 0;
                     while (!traceMap.isEmpty()) {
                         logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
                         Thread.sleep(1000);
-                        times += 1;
+                        retryTimes += 1;
                         // 要是重试超过20次(20s)，直接结束
-                        if (times >= 20) {
+                        if (retryTimes >= 20) {
                             callFinish();
                         }
                     }
@@ -143,7 +143,7 @@ public class ClientDataStreamHandler implements Runnable {
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
                     , Constants.UPDATE_TYPE, json, pos);
             wsClient.sendTextFrame(msg);
-            logger.info("成功上报wrongTraceId...");
+            logger.info("成功上报pos {} 的wrongTraceId...", pos);
         }
         // 清空2w为区间的set
         badTraceIdSet.clear();
@@ -188,7 +188,9 @@ public class ClientDataStreamHandler implements Runnable {
         // backend start pull these bucket
         Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
         // TODO 这里为什么会出现NPE呢？
-        if (traceMap == null) return;
+        if (traceMap == null) {
+            return ;
+        }
         for (String traceId : traceIdList) {
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
@@ -201,8 +203,6 @@ public class ClientDataStreamHandler implements Runnable {
                 } else {
                     wrongTraceMap.put(traceId, spanList);
                 }
-                //logger.info(String.format("拉取错误链路具体内容, bucketPos: %d, pos: %d, traceId: %s, spanListSize: %d",
-                //        bucketPos, pos, traceId, spanList.size()));
             }
         }
     }

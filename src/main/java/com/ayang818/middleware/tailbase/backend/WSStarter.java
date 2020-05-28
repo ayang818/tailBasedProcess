@@ -31,7 +31,7 @@ public class WSStarter {
 
     public void run() {
         EventLoopGroup bossGroup = new NioEventLoopGroup(4);
-        EventLoopGroup workerGroup = new NioEventLoopGroup(4);
+        EventLoopGroup workerGroup = new NioEventLoopGroup(8);
 
         ServerBootstrap server = new ServerBootstrap();
         server.group(bossGroup, workerGroup)
@@ -47,7 +47,7 @@ public class WSStarter {
 
                         pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null, false, 409600));
                         messageHandler = new MessageHandler();
-                        pipeline.addLast(new NioEventLoopGroup(4), messageHandler);
+                        pipeline.addLast(messageHandler);
 
                         // 60s 无读写，断开链接
                         pipeline.addLast(new IdleStateHandler(0, 0, 60));

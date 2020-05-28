@@ -26,7 +26,8 @@ public class PullDataService implements Runnable {
 
     public static Map<String, String> resMap = new ConcurrentHashMap<>();
 
-    public static LinkedBlockingQueue<TraceIdBucket> blockingQueue = new LinkedBlockingQueue<>();
+    public static LinkedBlockingQueue<TraceIdBucket> blockingQueue =
+            new LinkedBlockingQueue<>(100);
 
     private int prePos = -1;
 
@@ -41,7 +42,6 @@ public class PullDataService implements Runnable {
 
     @Override
     public void run() {
-        TraceIdBucket traceIdBucket = null;
         while (true) {
             TraceIdBucket bucket = null;
             try {

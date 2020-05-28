@@ -18,12 +18,18 @@ public class ACKData {
     private ConcurrentHashMap<String, List<String>> ackMap = new ConcurrentHashMap<>(32);
 
     public int putAll(Map<String, List<String>> map) {
+        String traceId;
+        List<String> spans;
+        List<String> newSpans;
         for (Map.Entry<String, List<String>> entry : map.entrySet()) {
-            List<String> spans = ackMap.get(entry.getKey());
+            traceId = entry.getKey();
+            spans = ackMap.get(traceId);
+            newSpans = entry.getValue();
+            // 这里还是有可能因为并发产生判断错误的
             if (spans == null) {
-                ackMap.put(entry.getKey(), entry.getValue());
+                ackMap.put(traceId, newSpans);
             } else {
-                spans.addAll(entry.getValue());
+                spans.addAll(newSpans);
             }
         }
         return remainAccessTime.decrementAndGet();

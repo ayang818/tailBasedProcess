@@ -35,7 +35,6 @@ public class TextFrameHandler {
                     JSONObject jsonObject = JSON.parseObject(payload);
                     int type = jsonObject.getObject("type", Integer.class);
 
-                    logger.info("收到backend发送的消息......");
                     switch (type) {
                         case Constants.PULL_TRACE_DETAIL_TYPE:
                             logger.info("收到backend拉取bucket data 请求，开始拉取数据......");

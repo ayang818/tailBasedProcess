@@ -11,6 +11,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,9 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     private static ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
 
+    private static final ExecutorService reportThreadPool = Executors.newFixedThreadPool(3,
+            new DefaultThreadFactory("report-threadPool"));
+
     /**
      * FIN_TIME will add one
      */
@@ -58,7 +62,9 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      */
     private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(100);
 
-    private static final Object LOCK = new Object();
+    private static final Object EVEN_LOCK = new Object();
+
+    private static final Object ODD_LOCK = new Object();
 
     public static void init() {
         for (int i = 0; i < BUCKET_COUNT; i++) {
@@ -80,14 +86,12 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 setWrongTraceId(badTraceIdList, pos);
                 break;
             case Constants.TRACE_DETAIL:
-                logger.info("收到client的traceDetail");
                 Map<String, List<String>> spans = jsonObject.getObject("data",
                     new TypeReference<Map<String, List<String>>>(){});
                 // pull data from this pos, here is for a recent ack!
                 int dataPos = jsonObject.getObject("dataPos", Integer.class);
-                // 提交到线程池中等待消费
-                // threadPool.execute(() -> consumeTraceDetails(spans, pos));
-
+                logger.info("收到client pos {} 的traceDetail", dataPos);
+                // 消费
                 consumeTraceDetails(spans, dataPos);
                 break;
             case Constants.FIN_TYPE:
@@ -104,46 +108,47 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      * @param detailMap
      * @param pos
      */
-    private void consumeTraceDetails(Map<String, List<String>> detailMap, Integer pos) {
+    private void consumeTraceDetails(Map<String, List<String>> detailMap, final Integer pos) {
         String posStr = String.valueOf(pos);
         ACKData ackData;
+        int remainAccessTime;
 
-        // 锁住，以免重复检测到未放入，导致脏读
-        synchronized (LOCK) {
+        // 以免重复检测到未放入，导致脏读（用奇数锁和偶数锁锁住，减少竞争）
+        synchronized (pos % 2 == 0 ? EVEN_LOCK : ODD_LOCK) {
             ackData = ACK_MAP.get(posStr);
             if (ackData == null) {
                 ackData = new ACKData();
             }
             ACK_MAP.put(posStr, ackData);
+            remainAccessTime = ackData.putAll(detailMap);
         }
 
         // 剩余可访问次数
-        int remainAccessTime = ackData.putAll(detailMap);
         logger.info("pos {} 处的数据还可被访问 {} 次", pos, remainAccessTime);
 
         if (remainAccessTime == 0) {
-            logger.info("开始消费 pos {} 处拉到的数据", pos);
+            final Map<String, List<String>> map = ackData.getAckMap();
 
-            Map<String, List<String>> map = ackData.getAckMap();
+            reportThreadPool.execute(() -> {
+                // 这里的key为string，计算md5
+                for (Map.Entry<String, List<String>> entry : map.entrySet()) {
+                    String spans = entry.getValue()
+                            .stream()
+                            .sorted(Comparator.comparing(MessageHandler::getStartTime))
+                            .collect(Collectors.joining("\n"));
+                    spans += "\n";
+                    resMap.put(entry.getKey(), md5(spans));
+                }
 
-            // 这里的key时String
-            for (Map.Entry<String, List<String>> entry : map.entrySet()) {
-                String spans = entry.getValue()
-                        .stream()
-                        .sorted(Comparator.comparing(MessageHandler::getStartTime))
-                        .collect(Collectors.joining("\n"));
-                spans += "\n";
+                // 此时才可以还原 bucketPos 所在 bucket 为初始状态，因为这个时候才刚好处理完这个bucket
+                TRACEID_BUCKET_LIST.get(pos % BUCKET_COUNT).clear();
+                ACK_MAP.remove(posStr);
 
-                resMap.put(entry.getKey(), md5(spans));
-            }
+                logger.info("{} 处的bucket消费完毕，清空此处的 bucket", pos);
 
-            // 还原 bucketPos 所在bucket为初始状态
-            TRACEID_BUCKET_LIST.get(pos % BUCKET_COUNT).clear();
+                logger.info("当前检测到 {} 条错误链路", resMap.size());
+            });
 
-            logger.info("{} 处的bucket消费完毕，清空此处的 bucket", pos);
-
-            ACK_MAP.remove(posStr);
-            logger.info("当前检测到 {} 条错误链路", resMap.size());
         }
     }
 
