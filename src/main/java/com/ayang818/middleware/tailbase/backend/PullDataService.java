@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 
 /**
@@ -32,7 +33,7 @@ public class PullDataService implements Runnable {
     private int prePos = -1;
 
     private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(10), new DefaultThreadFactory("startPool-backend"));
+            new ArrayBlockingQueue<>(10), new DefaultThreadFactory("backend-starter"));
 
     public static void start() {
         START_POOL.execute(new PullDataService());
@@ -69,12 +70,12 @@ public class PullDataService implements Runnable {
             timer = 0;
             prePos = bucket.getPos();
             // 发送取到的errTraceId 和 对应的 pos
-            List<String> traceIdList = bucket.getTraceIdList();
+            Set<String> badTraceIdSet = bucket.getTraceIdSet();
             int pos = bucket.getPos();
 
-            if (!traceIdList.isEmpty()) {
+            if (!badTraceIdSet.isEmpty()) {
                 // pull data from each client, then MessageHandler will consume these data
-                MessageHandler.pullWrongTraceDetails(JSON.toJSONString(traceIdList), pos);
+                MessageHandler.pullWrongTraceDetails(JSON.toJSONString(badTraceIdSet), pos);
             }
         }
     }

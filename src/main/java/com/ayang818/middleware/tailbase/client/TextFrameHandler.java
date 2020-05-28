@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author 杨丰畅
@@ -38,8 +39,8 @@ public class TextFrameHandler {
                     switch (type) {
                         case Constants.PULL_TRACE_DETAIL_TYPE:
                             logger.info("收到backend拉取bucket data 请求，开始拉取数据......");
-                            List<String> wrongTraceIdList = jsonObject.getObject("traceIdList",
-                                    new TypeReference<List<String>>() {});
+                            Set<String> wrongTraceIdList = jsonObject.getObject("traceIdSet",
+                                    new TypeReference<Set<String>>() {});
                             Integer pos = jsonObject.getObject("pos", Integer.class);
                             String wrongTraceDetails =
                                     ClientDataStreamHandler.getWrongTracing(wrongTraceIdList,

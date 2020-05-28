@@ -5,6 +5,7 @@ import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import org.apache.commons.io.IOUtils;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,11 +39,11 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60,
             TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(10), new DefaultThreadFactory("startPool-client"));
+            new ArrayBlockingQueue<>(10), new DefaultThreadFactory("client_starter"));
 
     private static final ExecutorService HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
             TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(10000), new DefaultThreadFactory("handleLine-threadPool"),
+            new ArrayBlockingQueue<>(10000), new DefaultThreadFactory("line-handler"),
             new ThreadPoolExecutor.CallerRunsPolicy());
 
     public static void init() {
@@ -112,7 +113,8 @@ public class ClientDataStreamHandler implements Runnable {
             HttpURLConnection httpConnection =
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
             InputStream input = httpConnection.getInputStream();
-            BufferedReader bf = new BufferedReader(new InputStreamReader(input));
+
+            BufferedReader bf = new BufferedReader(new InputStreamReader(input), 4096 * 4);
 
             String line;
 
@@ -122,7 +124,7 @@ public class ClientDataStreamHandler implements Runnable {
             // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
             int bucketPos = 0;
 
-            Set<String> tmpBadTraceIdSet = new HashSet<>(1000);
+            Set<String> tmpBadTraceIdSet = new HashSet<>(500);
             Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
 
             // start read stream line by line
@@ -135,17 +137,11 @@ public class ClientDataStreamHandler implements Runnable {
                         tmpBadTraceIdSet, traceMap));
 
                 if (count % Constants.BUCKET_SIZE == 0) {
-                    // 切换成下一个bucket
+                    // 切换成下一个bucket，重置tmpBadTraceSet
                     traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+                    tmpBadTraceIdSet = new HashSet<>(500);
                     // TODO 其实这里也可以用producer/consumer优化，但是这里好像触及不到性能瓶颈
                     int retryTimes = 0;
-                    while (!tmpBadTraceIdSet.isEmpty()) {
-                        try {
-                            Thread.sleep(10);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                    }
                     while (!traceMap.isEmpty()) {
                         logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
                         try {
@@ -159,13 +155,6 @@ public class ClientDataStreamHandler implements Runnable {
                             callFinish();
                         }
                     }
-                    // int idx = 0;
-                    // logger.info("=========================");
-                    // for (Map<String, Set<String>> stringSetMap : BUCKET_TRACE_LIST) {
-                    //     logger.info("idx {} map中大小为{}", idx, stringSetMap.size());
-                    //     idx += 1;
-                    // }
-                    // logger.info("=========================");
                 }
             }
             // last update, clear the badTraceIdSet
@@ -196,17 +185,16 @@ public class ClientDataStreamHandler implements Runnable {
             logger.info("成功上报pos {} 的wrongTraceId...", pos);
         }
         // 清空2w为区间的set
-        badTraceIdSet.clear();
     }
 
     /**
      * 给定区间中的所有错误traceId和pos，拉取对应traceIds的spans
      *
-     * @param wrongTraceIdList
+     * @param wrongTraceIdSet
      * @param pos
      * @return
      */
-    public static String getWrongTracing(List<String> wrongTraceIdList, int pos) {
+    public static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
         // calculate the three continue pos
         int curr = pos % BUCKET_COUNT;
         int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
@@ -215,16 +203,17 @@ public class ClientDataStreamHandler implements Runnable {
         logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket " +
                 "中的数据", curr, prev, next));
 
-        // a tmp map to collect spans
-        Map<String, Set<String>> wrongTraceMap = new ConcurrentHashMap<>(32);
+        // a tmp map to collect spans; use ConcurrentHashMap will cause ConcurrentModifiedException?
+        HashMap<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
         // these traceId data should be collect
-        getWrongTraceWithBucketPos(prev, pos, wrongTraceIdList, wrongTraceMap);
-        getWrongTraceWithBucketPos(curr, pos, wrongTraceIdList, wrongTraceMap);
-        getWrongTraceWithBucketPos(next, pos, wrongTraceIdList, wrongTraceMap);
+        getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
+        getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap);
+        getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
 
         // the previous bucket must have been consumed, so free this bucket
-        BUCKET_TRACE_LIST.get(prev).clear();
+        Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
+        traceBucket.clear();
 
         return JSON.toJSONString(wrongTraceMap);
     }
@@ -232,19 +221,16 @@ public class ClientDataStreamHandler implements Runnable {
     /**
      * @param bucketPos
      * @param pos
-     * @param traceIdList
+     * @param traceIdSet
      * @param wrongTraceMap
      */
     private static void getWrongTraceWithBucketPos(int bucketPos, int pos,
-                                                   List<String> traceIdList, Map<String,
+                                                   Set<String> traceIdSet, Map<String,
             Set<String>> wrongTraceMap) {
         // backend start pull these bucket
         Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
         // TODO 这里为什么会出现NPE呢？
-        if (traceMap == null) {
-            return;
-        }
-        for (String traceId : traceIdList) {
+        for (String traceId : traceIdSet) {
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
                 // one trace may cross two bucket (e.g bucket size 20000, span1 in line 19999,
@@ -269,11 +255,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            // return "http://localhost:8080/trace1.data";
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            // return "http://localhost:8080/trace2.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }

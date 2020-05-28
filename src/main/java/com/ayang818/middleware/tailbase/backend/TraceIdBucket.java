@@ -2,8 +2,9 @@ package com.ayang818.middleware.tailbase.backend;
 
 import com.ayang818.middleware.tailbase.Constants;
 
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author 杨丰畅
@@ -13,7 +14,7 @@ import java.util.List;
 public class TraceIdBucket {
     private int pos = 0;
     private int processCount = 0;
-    private List<String> traceIdList = new ArrayList<>(Constants.BUCKET_SIZE / 10);
+    private Set<String> traceIdSet = new HashSet<>(Constants.BUCKET_SIZE / 10);
 
     public int getPos() {
         return pos;
@@ -27,8 +28,8 @@ public class TraceIdBucket {
         return processCount;
     }
 
-    public List<String> getTraceIdList() {
-        return traceIdList;
+    public Set<String> getTraceIdSet() {
+        return traceIdSet;
     }
 
     public synchronized int addProcessCount() {
@@ -39,6 +40,6 @@ public class TraceIdBucket {
     public void clear() {
         pos = 0;
         processCount = 0;
-        traceIdList.clear();
+        traceIdSet.clear();
     }
 }

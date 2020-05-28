@@ -16,7 +16,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class IdleHandler extends ChannelDuplexHandler {
 
-
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         if (evt instanceof IdleStateEvent) {
