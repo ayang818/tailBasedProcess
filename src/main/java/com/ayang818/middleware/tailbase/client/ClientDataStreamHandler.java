@@ -62,11 +62,11 @@ public class ClientDataStreamHandler implements Runnable {
         private String line;
         private long count;
         private int pos;
-        private HashSet<String> tmpBadTraceIdSet;
-        private Map<String, HashSet<String>> traceMap;
+        private Set<String> tmpBadTraceIdSet;
+        private Map<String, Set<String>> traceMap;
 
         public Worker(final String line, final long count, final int pos,
-                      final HashSet<String> tmpBadTraceIdSet, final Map<String, HashSet<String>> traceMap) {
+                      final Set<String> tmpBadTraceIdSet, final Map<String, Set<String>> traceMap) {
             this.line = line;
             this.count = count;
             this.pos = pos;
@@ -127,7 +127,7 @@ public class ClientDataStreamHandler implements Runnable {
             int bucketPos = 0;
 
             HashSet<String> tmpBadTraceIdSet = new HashSet<>(500);
-            Map<String, HashSet<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+            Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
 
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
@@ -177,9 +177,9 @@ public class ClientDataStreamHandler implements Runnable {
      * @param badTraceIdSet
      * @param pos
      */
-    private void updateWrongTraceId(HashSet<String> badTraceIdSet, int pos) {
+    private void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
         // TODO ConcurrentModificationException
-        String json = JSON.toJSONString(badTraceIdSet.clone());
+        String json = JSON.toJSONString(badTraceIdSet);
         if (badTraceIdSet.size() > 0) {
             // send badTraceIdList and its pos to the backend
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
@@ -197,7 +197,7 @@ public class ClientDataStreamHandler implements Runnable {
      * @param pos
      * @return
      */
-    public static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
+    public synchronized static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
         // calculate the three continue pos
         int curr = pos % BUCKET_COUNT;
         int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
@@ -207,7 +207,7 @@ public class ClientDataStreamHandler implements Runnable {
                 "中的数据", curr, prev, next));
 
         // a tmp map to collect spans; use ConcurrentHashMap will cause ConcurrentModifiedException?
-        HashMap<String, Set<String>> wrongTraceMap = new HashMap<>(32);
+        Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
         // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
@@ -215,10 +215,10 @@ public class ClientDataStreamHandler implements Runnable {
         getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
 
         // the previous bucket must have been consumed, so free this bucket
-        Map<String, HashSet<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
+        Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
         traceBucket.clear();
 
-        return JSON.toJSONString(wrongTraceMap.clone());
+        return JSON.toJSONString(wrongTraceMap);
     }
 
     /**
@@ -231,7 +231,7 @@ public class ClientDataStreamHandler implements Runnable {
                                                    Set<String> traceIdSet, Map<String,
             Set<String>> wrongTraceMap) {
         // backend start pull these bucket
-        Map<String, HashSet<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+        Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
         // 这里为什么会出现NPE呢？fixed
         for (String traceId : traceIdSet) {
             Set<String> spanList = traceMap.get(traceId);
