@@ -3,7 +3,9 @@ package com.ayang818.middleware.tailbase.client;
 import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
+import com.ayang818.middleware.tailbase.utils.GsonUtils;
 import com.ayang818.middleware.tailbase.utils.WsClient;
+import com.google.gson.Gson;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
@@ -179,7 +181,7 @@ public class ClientDataStreamHandler implements Runnable {
      */
     private void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
         // TODO ConcurrentModificationException
-        String json = JSON.toJSONString(badTraceIdSet);
+        String json = GsonUtils.getGson().toJson(badTraceIdSet);
         if (badTraceIdSet.size() > 0) {
             // send badTraceIdList and its pos to the backend
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
@@ -187,7 +189,6 @@ public class ClientDataStreamHandler implements Runnable {
             wsClient.sendTextFrame(msg);
             logger.info("成功上报pos {} 的wrongTraceId...", pos);
         }
-        // 清空2w为区间的set
     }
 
     /**
@@ -197,7 +198,7 @@ public class ClientDataStreamHandler implements Runnable {
      * @param pos
      * @return
      */
-    public synchronized static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
+    public static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
         // calculate the three continue pos
         int curr = pos % BUCKET_COUNT;
         int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
@@ -218,7 +219,7 @@ public class ClientDataStreamHandler implements Runnable {
         Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
         traceBucket.clear();
 
-        return JSON.toJSONString(wrongTraceMap);
+        return GsonUtils.getGson().toJson(wrongTraceMap);
     }
 
     /**
@@ -258,11 +259,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            //return "http://localhost:8080/trace1.data";
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+            //return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            //return "http://localhost:8080/trace2.data";
+            //return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
