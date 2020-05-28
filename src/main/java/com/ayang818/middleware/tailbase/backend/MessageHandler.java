@@ -16,6 +16,10 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -93,7 +97,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 // pull data from this pos, here is for a recent ack!
                 int dataPos = jsonObject.getObject("dataPos", Integer.class);
                 // logger.info("收到client pos {} 的traceDetail", dataPos);
-
                 // 消费
                 consumeTraceDetails(spans, dataPos);
                 break;
@@ -118,11 +121,12 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
         // 以免重复检测到未放入，导致脏读（一组，减少竞争）
         synchronized (LOCK_LIST[pos % BUCKET_COUNT]) {
-            ackData = ACK_MAP.get(posStr);
-            if (ackData == null) {
+            if (ACK_MAP.containsKey(posStr)) {
+                ackData = ACK_MAP.get(posStr);
+            } else {
                 ackData = new ACKData();
+                ACK_MAP.put(posStr, ackData);
             }
-            ACK_MAP.put(posStr, ackData);
             remainAccessTime = ackData.putAll(detailMap);
         }
 
@@ -140,6 +144,13 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                             .sorted(Comparator.comparing(MessageHandler::getStartTime))
                             .collect(Collectors.joining("\n"));
                     spans += "\n";
+                    //String res = "";
+                    //res += entry.getKey() + ": " +entry.getValue().size() + "\n";
+                    //try {
+                    //    Files.write(Paths.get("D:/middlewaredata/my.data"), (res+spans).getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                    //} catch (IOException e) {
+                    //    e.printStackTrace();
+                    //}
                     resMap.put(entry.getKey(), md5(spans));
                 }
 

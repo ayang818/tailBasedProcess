@@ -25,7 +25,6 @@ public class ACKData {
             traceId = entry.getKey();
             spans = ackMap.get(traceId);
             newSpans = entry.getValue();
-            // 这里还是有可能因为并发产生判断错误的
             if (spans == null) {
                 ackMap.put(traceId, newSpans);
             } else {
@@ -33,10 +32,6 @@ public class ACKData {
             }
         }
         return remainAccessTime.decrementAndGet();
-    }
-
-    public int getRemainAccessTime() {
-        return remainAccessTime.get();
     }
 
     public ConcurrentHashMap<String, List<String>> getAckMap() {
