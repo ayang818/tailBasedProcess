@@ -59,8 +59,8 @@ public class PullDataService implements Runnable {
                     }
                 }
                 timer += 1;
-                if (timer >= 20) {
-                    // 如果重试次数超过10s，结束评测，免得等很长时间
+                if (timer >= 40) {
+                    // 如果重试次数超过20s，结束评测，免得等很长时间
                     sendCheckSum();
                     break;
                 }

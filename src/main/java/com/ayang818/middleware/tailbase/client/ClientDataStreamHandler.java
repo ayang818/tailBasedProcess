@@ -1,5 +1,6 @@
 package com.ayang818.middleware.tailbase.client;
 
+import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.GsonUtils;
@@ -163,8 +164,9 @@ public class ClientDataStreamHandler implements Runnable {
                         }
                         retryTimes += 1;
                         // 要是重试超过10次(10s)，直接强制清空
-                        if (retryTimes >= 20) {
+                        if (retryTimes >= 10) {
                             traceMap.clear();
+                            logger.warn("强制清空 pos {} 处的bucket", pos);
                         }
                     }
                 }
@@ -190,7 +192,7 @@ public class ClientDataStreamHandler implements Runnable {
      */
     private void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
         // TODO ConcurrentModificationException
-        String json = GsonUtils.getGson().toJson(badTraceIdSet);
+        String json = JSON.toJSONString(badTraceIdSet);
         if (badTraceIdSet.size() > 0) {
             // send badTraceIdList and its pos to the backend
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
@@ -229,7 +231,7 @@ public class ClientDataStreamHandler implements Runnable {
         Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev).getData();
         traceBucket.clear();
 
-        return GsonUtils.getGson().toJson(wrongTraceMap);
+        return JSON.toJSONString(wrongTraceMap);
     }
 
     /**

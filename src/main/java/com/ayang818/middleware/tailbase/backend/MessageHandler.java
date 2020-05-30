@@ -193,7 +193,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             traceIdBucket.setPos(pos);
             int processCount = traceIdBucket.addProcessCount();
             traceIdBucket.getTraceIdSet().addAll(badTraceIdSet);
-            logger.info(String.format("pos %d 位置的 bucket 访问次数到达 %d", pos, processCount));
+            // logger.info(String.format("pos %d 位置的 bucket 访问次数到达 %d", pos, processCount));
             // 使用阻塞队列优化，如果processCount >= TARGET_PROCESS_COUNT，那么推入消费队列，等待消费
             if (processCount >= TARGET_PROCESS_COUNT) {
                PullDataService.blockingQueue.offer(traceIdBucket);

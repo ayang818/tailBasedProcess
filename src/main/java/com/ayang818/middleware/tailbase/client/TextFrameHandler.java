@@ -38,7 +38,6 @@ public class TextFrameHandler {
 
                     switch (type) {
                         case Constants.PULL_TRACE_DETAIL_TYPE:
-                            logger.info("收到backend拉取bucket data 请求，开始拉取数据......");
                             Set<String> wrongTraceIdList = jsonObject.getObject("traceIdSet",
                                     new TypeReference<Set<String>>() {});
                             Integer pos = jsonObject.getObject("pos", Integer.class);
@@ -49,7 +48,6 @@ public class TextFrameHandler {
                                             "\"dataPos\": %d}",
                                     Constants.TRACE_DETAIL, wrongTraceDetails, pos);
                             WsClient.getWebSocketClient().sendTextFrame(msg);
-                            logger.info("成功发送pos {} 请求拉取的traceDetail数据......", pos);
                             break;
                         default:
                             break;
