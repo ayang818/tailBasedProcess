@@ -1,9 +1,7 @@
 package com.ayang818.middleware.tailbase.client;
 
 import com.alibaba.fastjson.JSON;
-import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
-import com.ayang818.middleware.tailbase.utils.GsonUtils;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
@@ -38,7 +36,9 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static int BUCKET_COUNT = 20;
 
-    private static WebSocket wsClient;
+    private static WebSocket sendWebSocket;
+
+    private static WebSocket receiveWebsocketClient;
 
     private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60,
             TimeUnit.SECONDS,
@@ -103,7 +103,9 @@ public class ClientDataStreamHandler implements Runnable {
     @Override
     public void run() {
         try {
-            wsClient = WsClient.getWebSocketClient();
+            sendWebSocket = WsClient.getSendWebsocketClient();
+            receiveWebsocketClient = WsClient.getReceiveWebsocketClient();
+
             String path = getPath();
             // process data on client, not server
             if (StringUtils.isEmpty(path)) {
@@ -165,8 +167,9 @@ public class ClientDataStreamHandler implements Runnable {
                         retryTimes += 1;
                         // 要是重试超过10次(10s)，直接强制清空
                         if (retryTimes >= 10) {
-                            traceMap.clear();
-                            logger.warn("强制清空 pos {} 处的bucket", pos);
+                            callFinish();
+                            // logger.warn("强制清空 pos {} 处的bucket", pos);
+                            return ;
                         }
                     }
                 }
@@ -197,7 +200,7 @@ public class ClientDataStreamHandler implements Runnable {
             // send badTraceIdList and its pos to the backend
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
                     , Constants.UPDATE_TYPE, json, pos);
-            wsClient.sendTextFrame(msg);
+            sendWebSocket.sendTextFrame(msg);
             logger.info("成功上报pos {} 的wrongTraceId...", pos);
         }
     }
@@ -215,8 +218,7 @@ public class ClientDataStreamHandler implements Runnable {
         int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
         int next = (curr + 1 == BUCKET_COUNT) ? 0 : (curr + 1) % BUCKET_COUNT;
 
-        logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket " +
-                "中的数据", curr, prev, next));
+        logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket中的数据", curr, prev, next));
 
         // a tmp map to collect spans; use ConcurrentHashMap will cause ConcurrentModifiedException?
         Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
@@ -268,7 +270,7 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     private void callFinish() {
-        wsClient.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE));
+        sendWebSocket.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE));
         logger.info("已发送 FIN 请求");
     }
 
@@ -276,11 +278,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            // return "http://localhost:8080/trace1.data";
-           return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-           return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            // return "http://localhost:8080/trace2.data";
+           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }

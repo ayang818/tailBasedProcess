@@ -12,9 +12,10 @@ import java.util.Set;
  * @date 2020/5/22 23:21
  **/
 public class TraceIdBucket {
-    private int pos = 0;
+    private int pos = -1;
     private int processCount = 0;
-    private Set<String> traceIdSet = new HashSet<>(Constants.BUCKET_SIZE / 10);
+    // 一个bucket中20条traceId
+    private Set<String> traceIdSet = new HashSet<>(Constants.BUCKET_SIZE / 100);
 
     public int getPos() {
         return pos;
@@ -38,7 +39,7 @@ public class TraceIdBucket {
     }
 
     public void clear() {
-        pos = 0;
+        pos = -1;
         processCount = 0;
         traceIdSet.clear();
     }

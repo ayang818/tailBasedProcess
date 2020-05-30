@@ -11,15 +11,12 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,7 +40,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     private static ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
 
-    private static final ExecutorService reportThreadPool = Executors.newFixedThreadPool(3,
+    private static final ExecutorService reportThreadPool = Executors.newFixedThreadPool(4,
             new DefaultThreadFactory("report-checkSum"));
 
     /**
@@ -52,22 +49,20 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     private static final AtomicInteger FIN_TIME = new AtomicInteger(0);
 
     /**
-     * save 90 buckets for wrong trace
+     * save 40 buckets for wrong trace
      */
-    private static final int BUCKET_COUNT = 90;
+    private static final int BUCKET_COUNT = 100;
 
-    private static final List<TraceIdBucket> TRACEID_BUCKET_LIST = new ArrayList<>();
+    private static final List<TraceIdBucket> TRACEID_BUCKET_LIST = new ArrayList<>(BUCKET_COUNT);
 
     /**
      * key is pos, value is data
      */
     private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(100);
 
-    private static final Object EVEN_LOCK = new Object();
-
-    private static final Object ODD_LOCK = new Object();
-
     private static final Object[] LOCK_LIST = new Object[BUCKET_COUNT];
+
+    private static final AttributeKey<Boolean> isReceiverChannel = AttributeKey.newInstance("isSender");
 
     public static void init() {
         for (int i = 0; i < BUCKET_COUNT; i++) {
@@ -88,7 +83,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                         new TypeReference<Set<String>>() {});
                 int pos = jsonObject.getObject("pos", Integer.class);
                 // logger.info("收到client pos {} 的update", pos);
-
                 setWrongTraceId(badTraceIdSet, pos);
                 break;
             case Constants.TRACE_DETAIL:
@@ -103,6 +97,12 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
                 logger.info("收到 {} 次 Fin请求", finTime);
+            case Constants.CHANNEL_TYPE:
+                Integer channelType = jsonObject.getObject("channelType", Integer.class);
+                if (channelType == null) return ;
+                boolean isRecv = channelType == Constants.RECEIVER_TYPE;
+                ctx.channel().attr(isReceiverChannel).set(isRecv);
+                logger.info("注册为 {} channel", isRecv ? "接收信息" : "发送信息");
             default:
                 break;
         }
@@ -144,13 +144,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                             .sorted(Comparator.comparing(MessageHandler::getStartTime))
                             .collect(Collectors.joining("\n"));
                     spans += "\n";
-                    //String res = "";
-                    //res += entry.getKey() + ": " +entry.getValue().size() + "\n";
-                    //try {
-                    //    Files.write(Paths.get("D:/middlewaredata/my.data"), (res+spans).getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                    //} catch (IOException e) {
-                    //    e.printStackTrace();
-                    //}
                     resMap.put(entry.getKey(), md5(spans));
                 }
 
@@ -174,7 +167,11 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     public static void pullWrongTraceDetails(String traceIdListString, int pos) {
         String msg = String.format("{\"type\": %d, \"traceIdSet\": %s, \"pos\": %d}",
                 Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, pos);
-        channels.writeAndFlush(new TextWebSocketFrame(msg));
+        channels.parallelStream().forEach(channel -> {
+            if (channel.attr(isReceiverChannel).get()) {
+                channel.writeAndFlush(new TextWebSocketFrame(msg));
+            }
+        });
         logger.info("发送拉取 {} pos处 bucket data请求.....", pos);
     }
 
@@ -186,7 +183,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     public void setWrongTraceId(Set<String> badTraceIdSet, int pos) {
         int bucketPos = pos % BUCKET_COUNT;
         TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(bucketPos);
-        if (traceIdBucket.getPos() != 0 && traceIdBucket.getPos() != pos) {
+        if (traceIdBucket.getPos() != -1 && traceIdBucket.getPos() != pos) {
             logger.warn("覆盖了 {} 位置的正在工作的 bucket!!!", bucketPos);
         }
         if (badTraceIdSet != null && badTraceIdSet.size() > 0) {
@@ -210,7 +207,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         if (FIN_TIME.get() < TARGET_PROCESS_COUNT) return false;
         // bucket中元素是否消费完
         for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
-            if (traceIdBucket.getPos() != 0) {
+            if (traceIdBucket.getPos() != -1) {
                 return false;
             }
         }
@@ -315,7 +312,11 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             int bucketPos = traceIdBucket.getPos();
             String msg = String.format("{\"type\": %d, \"traceIdSet\": %s, \"bucketPos\": %d}",
                     Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, bucketPos);
-            channels.writeAndFlush(new TextWebSocketFrame(msg));
+            channels.parallelStream().forEach(channel -> {
+                if (channel.attr(isReceiverChannel).get()) {
+                    channel.writeAndFlush(new TextWebSocketFrame(msg));
+                }
+            });
         }
     }
 

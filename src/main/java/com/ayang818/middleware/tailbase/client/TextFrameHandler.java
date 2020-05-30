@@ -11,7 +11,6 @@ import org.asynchttpclient.ws.WebSocketUpgradeHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -47,7 +46,7 @@ public class TextFrameHandler {
                             String msg = String.format("{\"type\": %d, \"data\": %s, " +
                                             "\"dataPos\": %d}",
                                     Constants.TRACE_DETAIL, wrongTraceDetails, pos);
-                            WsClient.getWebSocketClient().sendTextFrame(msg);
+                            WsClient.getSendWebsocketClient().sendTextFrame(msg);
                             break;
                         default:
                             break;
