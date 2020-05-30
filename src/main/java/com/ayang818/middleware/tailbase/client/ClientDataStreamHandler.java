@@ -162,9 +162,9 @@ public class ClientDataStreamHandler implements Runnable {
                             e.printStackTrace();
                         }
                         retryTimes += 1;
-                        // 要是重试超过20次(20s)，直接结束
+                        // 要是重试超过10次(10s)，直接强制清空
                         if (retryTimes >= 20) {
-                            callFinish();
+                            traceMap.clear();
                         }
                     }
                 }

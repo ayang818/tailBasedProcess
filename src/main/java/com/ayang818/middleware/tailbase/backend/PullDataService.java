@@ -59,11 +59,11 @@ public class PullDataService implements Runnable {
                     }
                 }
                 timer += 1;
-                if (timer >= 100) {
-                    // 如果重试次数超过100次，结束评测，免得等很长时间
+                if (timer >= 20) {
+                    // 如果重试次数超过10s，结束评测，免得等很长时间
                     sendCheckSum();
+                    break;
                 }
-                logger.info("失败获取可消费的bucket，上次消费成功的pos为 {} ......", prePos);
                 continue;
             }
             // 获取到了bucket，timer置为0
