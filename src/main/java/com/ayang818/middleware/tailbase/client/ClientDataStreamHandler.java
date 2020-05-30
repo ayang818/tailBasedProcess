@@ -1,11 +1,8 @@
 package com.ayang818.middleware.tailbase.client;
 
-import com.alibaba.fastjson.JSON;
-import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.GsonUtils;
 import com.ayang818.middleware.tailbase.utils.WsClient;
-import com.google.gson.Gson;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
@@ -52,7 +49,7 @@ public class ClientDataStreamHandler implements Runnable {
 
     public static void init() {
         for (int i = 0; i < BUCKET_COUNT; i++) {
-            BUCKET_TRACE_LIST.add(new ConcurrentHashMap<>(Constants.BUCKET_SIZE));
+            BUCKET_TRACE_LIST.add(new TraceCacheBucket());
         }
     }
 
@@ -129,7 +126,10 @@ public class ClientDataStreamHandler implements Runnable {
             int bucketPos = 0;
 
             HashSet<String> tmpBadTraceIdSet = new HashSet<>(500);
-            Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+            TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+            Map<String, Set<String>> traceMap = traceCacheBucket.getData();
+            // marked as a working bucket
+            traceCacheBucket.tryEnter();
 
             // start read stream line by line
             while ((line = bf.readLine()) != null) {
@@ -141,8 +141,15 @@ public class ClientDataStreamHandler implements Runnable {
                         tmpBadTraceIdSet, traceMap));
 
                 if (count % Constants.BUCKET_SIZE == 0) {
-                    // 切换成下一个bucket，重置tmpBadTraceSet
-                    traceMap = BUCKET_TRACE_LIST.get(bucketPos);
+                    // 切换bucket前先将前一个bucket设置为非工作状态
+                    traceCacheBucket.tryQuit();
+
+                    // 切换成下一个bucket，并设为工作状态
+                    traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+                    while (!traceCacheBucket.tryEnter()) {}
+                    traceMap = traceCacheBucket.getData();
+
+                    // 重置tmpBadTraceSet
                     tmpBadTraceIdSet = new HashSet<>(500);
                     // TODO 其实这里也可以用producer/consumer优化，但是这里好像触及不到性能瓶颈
                     int retryTimes = 0;
@@ -163,6 +170,7 @@ public class ClientDataStreamHandler implements Runnable {
             }
             // last update, clear the badTraceIdSet
             updateWrongTraceId(tmpBadTraceIdSet, pos);
+            traceCacheBucket.tryQuit();
 
             bf.close();
             input.close();
@@ -213,10 +221,11 @@ public class ClientDataStreamHandler implements Runnable {
         // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
         getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap);
+        // TODO ConcurrentModificationException, why?
         getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
 
         // the previous bucket must have been consumed, so free this bucket
-        Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev);
+        Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev).getData();
         traceBucket.clear();
 
         return GsonUtils.getGson().toJson(wrongTraceMap);
@@ -232,9 +241,12 @@ public class ClientDataStreamHandler implements Runnable {
                                                    Set<String> traceIdSet, Map<String,
             Set<String>> wrongTraceMap) {
         // backend start pull these bucket
-        Map<String, Set<String>> traceMap = BUCKET_TRACE_LIST.get(bucketPos);
-        // 这里为什么会出现NPE呢？fixed
+        TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+        // 当bucket仍然在进行读入工作时，cas尝试交换
+        while (!traceCacheBucket.tryEnter()) {}
+        Map<String, Set<String>> traceMap = traceCacheBucket.getData();
         for (String traceId : traceIdSet) {
+            // 主要是这里可能是不断变动的，所以会导致C.M.E
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
                 // one trace may cross two bucket (e.g bucket size 20000, span1 in line 19999,
@@ -242,12 +254,14 @@ public class ClientDataStreamHandler implements Runnable {
                 //in line 20001)
                 Set<String> existSpanList = wrongTraceMap.get(traceId);
                 if (existSpanList != null) {
+                    // TODO caused, fixed waited，这里的报错的原因应该是应该是
                     existSpanList.addAll(spanList);
                 } else {
                     wrongTraceMap.put(traceId, spanList);
                 }
             }
         }
+        traceCacheBucket.tryQuit();
     }
 
     private void callFinish() {
@@ -259,11 +273,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            //return "http://localhost:8080/trace1.data";
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            //return "http://localhost:8080/trace2.data";
+           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
