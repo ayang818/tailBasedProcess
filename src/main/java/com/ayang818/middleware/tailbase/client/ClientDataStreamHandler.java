@@ -1,5 +1,6 @@
 package com.ayang818.middleware.tailbase.client;
 
+import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.GsonUtils;
 import com.ayang818.middleware.tailbase.utils.WsClient;
@@ -273,11 +274,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            return "http://localhost:8080/trace1.data";
-           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            // return "http://localhost:8080/trace1.data";
+           return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            return "http://localhost:8080/trace2.data";
+           return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            // return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
