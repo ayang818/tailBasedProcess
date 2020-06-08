@@ -14,9 +14,11 @@ public class Constants {
     public static final int BUCKET_SIZE = 20000;
     // client下bucket的数量
     public static final int CLIENT_BUCKET_COUNT = 30;
+    // backend下bucket的数量
+    public static final int BACKEND_BUCKET_COUNT = 100;
     // 保守估计每个traceId下只有2条数据
     public static final int CLIENT_BUCKET_MAP_SIZE = 10000;
-    public static final int BUCKET_ERR_TRACE_COUNT = 200;
+    public static final int BUCKET_ERR_TRACE_COUNT = 20;
     // 到达次数，取决于client数量
     public static final int TARGET_PROCESS_COUNT = 2;
     // 4MB

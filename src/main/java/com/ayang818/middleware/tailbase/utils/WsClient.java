@@ -3,7 +3,6 @@ package com.ayang818.middleware.tailbase.utils;
 import com.ayang818.middleware.tailbase.Constants;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.DefaultAsyncHttpClientConfig;
 import org.asynchttpclient.Dsl;
@@ -28,23 +27,23 @@ public class WsClient {
 
     private static final Logger logger = LoggerFactory.getLogger(WsClient.class);
 
-    private static DefaultAsyncHttpClientConfig sendConfig =
+    private static final DefaultAsyncHttpClientConfig sendConfig =
             Dsl.config()
                     .setWebSocketMaxFrameSize(204800)
                     .setEventLoopGroup(new NioEventLoopGroup(1, new DefaultThreadFactory(
                             "send-websocket")))
                     .build();
 
-    private static DefaultAsyncHttpClientConfig receiveConfig =
+    private static final DefaultAsyncHttpClientConfig receiveConfig =
             Dsl.config()
                     .setWebSocketMaxFrameSize(204800)
                     .setEventLoopGroup(new NioEventLoopGroup(4, new DefaultThreadFactory(
                             "receive-websocket")))
                     .build();
 
-    private static AsyncHttpClient sendClient = Dsl.asyncHttpClient(sendConfig);
+    private static final AsyncHttpClient sendClient = Dsl.asyncHttpClient(sendConfig);
 
-    private static AsyncHttpClient receiveClient = Dsl.asyncHttpClient(receiveConfig);
+    private static final AsyncHttpClient receiveClient = Dsl.asyncHttpClient(receiveConfig);
 
     private static volatile WebSocket sendWebsocketClient;
 

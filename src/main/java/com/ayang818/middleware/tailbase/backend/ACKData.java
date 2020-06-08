@@ -34,7 +34,7 @@ public class ACKData {
         return remainAccessTime.decrementAndGet();
     }
 
-    public ConcurrentHashMap<String, List<String>> getAckMap() {
+    public Map<String, List<String>> getAckMap() {
         return ackMap;
     }
 

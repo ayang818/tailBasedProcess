@@ -15,7 +15,7 @@ public class TraceIdBucket {
     private int pos = -1;
     private int processCount = 0;
     // 一个bucket中20条traceId
-    private Set<String> traceIdSet = new HashSet<>(Constants.BUCKET_SIZE / 100);
+    private Set<String> traceIdSet = new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT);
 
     public int getPos() {
         return pos;
@@ -38,7 +38,7 @@ public class TraceIdBucket {
         return processCount;
     }
 
-    public void clear() {
+    public void reset() {
         pos = -1;
         processCount = 0;
         traceIdSet.clear();

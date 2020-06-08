@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.ayang818.middleware.tailbase.Constants.TARGET_PROCESS_COUNT;
+import static com.ayang818.middleware.tailbase.Constants.BACKEND_BUCKET_COUNT;
 import static com.ayang818.middleware.tailbase.backend.PullDataService.resMap;
 
 /**
@@ -35,37 +36,26 @@ import static com.ayang818.middleware.tailbase.backend.PullDataService.resMap;
  **/
 @ChannelHandler.Sharable
 public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
-
     private static final Logger logger = LoggerFactory.getLogger(MessageHandler.class);
-
     private static ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-
-    private static final ExecutorService reportThreadPool = Executors.newFixedThreadPool(4,
+    // calc checksum res thread
+    private static final ExecutorService reportThreadPool = Executors.newFixedThreadPool(1,
             new DefaultThreadFactory("report-checkSum"));
-
-    /**
-     * FIN_TIME will add one
-     */
+    // FIN_TIME will add one
     private static final AtomicInteger FIN_TIME = new AtomicInteger(0);
-
-    /**
-     * save 40 buckets for wrong trace
-     */
-    private static final int BUCKET_COUNT = 100;
-
-    private static final List<TraceIdBucket> TRACEID_BUCKET_LIST = new ArrayList<>(BUCKET_COUNT);
-
-    /**
-     * key is pos, value is data
-     */
-    private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(100);
-
-    private static final Object[] LOCK_LIST = new Object[BUCKET_COUNT];
-
-    private static final AttributeKey<Boolean> isReceiverChannel = AttributeKey.newInstance("isSender");
+    // waiting to consume bucket list
+    private static final List<TraceIdBucket> TRACEID_BUCKET_LIST = new ArrayList<>(BACKEND_BUCKET_COUNT);
+    // waiting client's ack data; key is pos, value is data
+    private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(200);
+    // lock list
+    private static final Object[] LOCK_LIST = new Object[BACKEND_BUCKET_COUNT];
+    // judge if is receiver channel
+    private static final AttributeKey<Boolean> isReceiverChannel = AttributeKey.newInstance("isReceiver");
+    // use for md5 calc
+    private static char[] hexDigits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
     public static void init() {
-        for (int i = 0; i < BUCKET_COUNT; i++) {
+        for (int i = 0; i < BACKEND_BUCKET_COUNT; i++) {
             TRACEID_BUCKET_LIST.add(new TraceIdBucket());
             LOCK_LIST[i] = new Object();
         }
@@ -90,19 +80,19 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                     new TypeReference<Map<String, List<String>>>(){});
                 // pull data from this pos, here is for a recent ack!
                 int dataPos = jsonObject.getObject("dataPos", Integer.class);
-                // logger.info("收到client pos {} 的traceDetail", dataPos);
-                // 消费
                 consumeTraceDetails(spans, dataPos);
                 break;
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
                 logger.info("收到 {} 次 Fin请求", finTime);
+                break;
             case Constants.CHANNEL_TYPE:
                 Integer channelType = jsonObject.getObject("channelType", Integer.class);
                 if (channelType == null) return ;
-                boolean isRecv = channelType == Constants.RECEIVER_TYPE;
+                boolean isRecv = (channelType == Constants.RECEIVER_TYPE);
                 ctx.channel().attr(isReceiverChannel).set(isRecv);
                 logger.info("注册为 {} channel", isRecv ? "接收信息" : "发送信息");
+                break;
             default:
                 break;
         }
@@ -114,13 +104,13 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      * @param detailMap
      * @param pos
      */
-    private void consumeTraceDetails(Map<String, List<String>> detailMap, final Integer pos) {
+    private void consumeTraceDetails(Map<String, List<String>> detailMap, int pos) {
         String posStr = String.valueOf(pos);
         ACKData ackData;
         int remainAccessTime;
 
-        // 以免重复检测到未放入，导致脏读（一组，减少竞争）
-        synchronized (LOCK_LIST[pos % BUCKET_COUNT]) {
+        // 以免重复检测到未放入，导致脏读（一组锁，减少竞争）
+        synchronized (LOCK_LIST[pos % BACKEND_BUCKET_COUNT]) {
             if (ACK_MAP.containsKey(posStr)) {
                 ackData = ACK_MAP.get(posStr);
             } else {
@@ -130,15 +120,14 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             remainAccessTime = ackData.putAll(detailMap);
         }
 
-        // 剩余可访问次数
-        // logger.info("pos {} 处的数据还可被访问 {} 次", pos, remainAccessTime);
-
         if (remainAccessTime == 0) {
-            final Map<String, List<String>> map = ackData.getAckMap();
-
             reportThreadPool.execute(() -> {
+                Map<String, List<String>> ackMap = ackData.getAckMap();
                 // 这里的key为string，计算md5
-                for (Map.Entry<String, List<String>> entry : map.entrySet()) {
+                Iterator<Map.Entry<String, List<String>>> it = ackMap.entrySet().iterator();
+                Map.Entry<String, List<String>> entry;
+                while (it.hasNext()) {
+                    entry = it.next();
                     String spans = entry.getValue()
                             .stream()
                             .sorted(Comparator.comparing(MessageHandler::getStartTime))
@@ -146,16 +135,11 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                     spans += "\n";
                     resMap.put(entry.getKey(), md5(spans));
                 }
-
                 // 此时才可以还原 bucketPos 所在 bucket 为初始状态，因为这个时候才刚好处理完这个bucket
-                TRACEID_BUCKET_LIST.get(pos % BUCKET_COUNT).clear();
+                TRACEID_BUCKET_LIST.get(pos % BACKEND_BUCKET_COUNT).reset();
                 ACK_MAP.remove(posStr);
-
-                logger.info("{} 处的bucket消费完毕，清空此处的 bucket", pos);
-
-                logger.info("当前检测到 {} 条错误链路", resMap.size());
+                logger.info("{} 处的bucket消费完毕，清空此处的 bucket; 当前检测到 {} 条错误链路", pos, resMap.size());
             });
-
         }
     }
 
@@ -181,7 +165,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      * @param pos
      */
     public void setWrongTraceId(Set<String> badTraceIdSet, int pos) {
-        int bucketPos = pos % BUCKET_COUNT;
+        int bucketPos = pos % BACKEND_BUCKET_COUNT;
         TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(bucketPos);
         if (traceIdBucket.getPos() != -1 && traceIdBucket.getPos() != pos) {
             logger.warn("覆盖了 {} 位置的正在工作的 bucket!!!", bucketPos);
@@ -244,9 +228,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     }
 
     public String md5(String key) {
-        char[] hexDigits = {
-                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
-        };
         try {
             byte[] btInput = key.getBytes();
             // 获得MD5摘要算法的 MessageDigest 对象
@@ -278,9 +259,9 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      */
     @Deprecated
     public static TraceIdBucket getFinishedBucket(int startPos) {
-        int end = startPos + BUCKET_COUNT;
+        int end = startPos + BACKEND_BUCKET_COUNT;
         for (int i = startPos; i < end; i++) {
-            int cur = i % BUCKET_COUNT;
+            int cur = i % BACKEND_BUCKET_COUNT;
             TraceIdBucket currentBucket = TRACEID_BUCKET_LIST.get(cur);
 
             if (currentBucket.getProcessCount() >= TARGET_PROCESS_COUNT) {
@@ -309,7 +290,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 i++;
                 if (i == 4) {
                     flag = true;
-                    traceIdBucket.clear();
+                    traceIdBucket.reset();
                 }
             }
             if (flag) continue;

@@ -29,7 +29,7 @@ public class WSStarter {
 
     public void run() {
         EventLoopGroup bossGroup = new NioEventLoopGroup();
-        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        EventLoopGroup workerGroup = new NioEventLoopGroup(2);
 
         ServerBootstrap server = new ServerBootstrap();
         server.group(bossGroup, workerGroup)

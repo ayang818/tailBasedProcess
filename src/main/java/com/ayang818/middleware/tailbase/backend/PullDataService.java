@@ -25,7 +25,7 @@ public class PullDataService implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(PullDataService.class);
 
-    public static Map<String, String> resMap = new ConcurrentHashMap<>();
+    public static Map<String, String> resMap = new ConcurrentHashMap<>(10240);
 
     public static LinkedBlockingQueue<TraceIdBucket> blockingQueue =
             new LinkedBlockingQueue<>(100);

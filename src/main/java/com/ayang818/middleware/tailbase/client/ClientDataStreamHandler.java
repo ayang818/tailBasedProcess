@@ -1,7 +1,6 @@
 package com.ayang818.middleware.tailbase.client;
 
 import com.alibaba.fastjson.JSON;
-import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import org.asynchttpclient.ws.WebSocket;
@@ -35,8 +34,6 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static WebSocket sendWebSocket;
 
-    private static WebSocket receiveWebsocketClient;
-
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new TraceCacheBucket(Constants.CLIENT_BUCKET_MAP_SIZE));
@@ -52,7 +49,7 @@ public class ClientDataStreamHandler implements Runnable {
     public void run() {
         try {
             sendWebSocket = WsClient.getSendWebsocketClient();
-            receiveWebsocketClient = WsClient.getReceiveWebsocketClient();
+            WsClient.getReceiveWebsocketClient();
 
             String path = getPath();
             // process data on client, not server
@@ -169,7 +166,7 @@ public class ClientDataStreamHandler implements Runnable {
         int prev = (curr - 1 == -1) ? bucketCount - 1 : (curr - 1) % bucketCount;
         int next = (curr + 1 == bucketCount) ? 0 : (curr + 1) % bucketCount;
 
-        logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket中的数据", curr, prev, next));
+        logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket中的数据", pos, curr, prev, next));
 
         // a tmp map to collect spans; use ConcurrentHashMap will cause ConcurrentModifiedException?
         Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
@@ -229,11 +226,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            // return "http://localhost:8080/trace1.data";
-           return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-           return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-           //  return "http://localhost:8080/trace2.data";
+           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
@@ -280,7 +277,6 @@ public class ClientDataStreamHandler implements Runnable {
             }
 
             if (count % Constants.BUCKET_SIZE == 0) {
-                logger.info("上报 pos {} 的wrongTraceId到backend", pos - 1);
                 // 更新wrongTraceId到backend
                 updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
             }
