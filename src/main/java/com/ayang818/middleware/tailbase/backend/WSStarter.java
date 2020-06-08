@@ -1,5 +1,6 @@
 package com.ayang818.middleware.tailbase.backend;
 
+import com.ayang818.middleware.tailbase.Constants;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -24,14 +25,11 @@ public class WSStarter {
 
     private ChannelFuture channelFuture;
 
-    // websocket port
-    private static final Integer PORT = 8003;
-
     public static MessageHandler messageHandler;
 
     public void run() {
-        EventLoopGroup bossGroup = new NioEventLoopGroup(4);
-        EventLoopGroup workerGroup = new NioEventLoopGroup(20);
+        EventLoopGroup bossGroup = new NioEventLoopGroup();
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
 
         ServerBootstrap server = new ServerBootstrap();
         server.group(bossGroup, workerGroup)
@@ -55,9 +53,7 @@ public class WSStarter {
                     }
                 });
 
-        channelFuture = server.bind(PORT);
-        channelFuture.addListener((ChannelFutureListener) future -> {
-            logger.info("websocket 服务已在 {} 端口启动", PORT);
-        });
+        channelFuture = server.bind(Constants.BACKEND_WEBSOCKET_PORT);
+        channelFuture.addListener((ChannelFutureListener) future -> logger.info("websocket 服务已在 {} 端口启动", Constants.BACKEND_WEBSOCKET_PORT));
     }
 }

@@ -18,8 +18,8 @@ public class TraceCacheBucket {
     private Map<String, Set<String>> data;
     private final AtomicBoolean isWorking;
 
-    public TraceCacheBucket() {
-        data = new ConcurrentHashMap<>(BUCKET_SIZE);
+    public TraceCacheBucket(int size) {
+        data = new ConcurrentHashMap<>(size);
         isWorking = new AtomicBoolean(false);
     }
 

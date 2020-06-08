@@ -215,11 +215,18 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     }
 
     public static long getStartTime(String span) {
-        if (span != null) {
-            String[] cols = span.split("\\|");
-            if (cols.length > 8) {
-                return BaseUtils.toLong(cols[1], -1);
+        StringBuilder startTimeBuilder = new StringBuilder();
+        char[] chars = span.toCharArray();
+        int ICount = 0;
+        for (char tmp : chars) {
+            if (tmp == '|') {
+                ICount += 1;
+                if (ICount == 2) {
+                    return BaseUtils.toLong(startTimeBuilder.toString(), -1);
+                }
+                continue;
             }
+            if (ICount == 1) startTimeBuilder.append(tmp);
         }
         return -1;
     }

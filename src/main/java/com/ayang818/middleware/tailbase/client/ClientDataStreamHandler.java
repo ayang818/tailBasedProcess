@@ -4,7 +4,6 @@ import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +20,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.*;
 
-import static com.ayang818.middleware.tailbase.client.DataStorage.BUCKET_TRACE_LIST;
+import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
 /**
  * @author 杨丰畅
@@ -35,70 +33,19 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(ClientDataStreamHandler.class);
 
-    private static int BUCKET_COUNT = 20;
-
     private static WebSocket sendWebSocket;
 
     private static WebSocket receiveWebsocketClient;
 
-    private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60,
-            TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(10), new DefaultThreadFactory("client_starter"));
-
-    private static final ExecutorService HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
-            TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(10000), new DefaultThreadFactory("line-handler"),
-            new ThreadPoolExecutor.CallerRunsPolicy());
-
     public static void init() {
-        for (int i = 0; i < BUCKET_COUNT; i++) {
-            BUCKET_TRACE_LIST.add(new TraceCacheBucket());
+        for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
+            BUCKET_TRACE_LIST.add(new TraceCacheBucket(Constants.CLIENT_BUCKET_MAP_SIZE));
+            ERR_TRACE_SET_LIST.add(new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT));
         }
     }
 
     public static void start() {
         START_POOL.execute(new ClientDataStreamHandler());
-    }
-
-    private class Worker implements Runnable {
-        private String line;
-        private long count;
-        private int pos;
-        private Set<String> tmpBadTraceIdSet;
-        private Map<String, Set<String>> traceMap;
-
-        public Worker(final String line, final long count, final int pos,
-                      final Set<String> tmpBadTraceIdSet, final Map<String, Set<String>> traceMap) {
-            this.line = line;
-            this.count = count;
-            this.pos = pos;
-            this.tmpBadTraceIdSet = tmpBadTraceIdSet;
-            this.traceMap = traceMap;
-        }
-
-        @Override
-        public void run() {
-            String[] cols = line.split("\\|");
-            if (cols.length < 9) {
-                logger.info("bad span format");
-                return;
-            }
-            String traceId = cols[0];
-            String tags = cols[8];
-
-            Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
-            spanList.add(line);
-
-            if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
-                tmpBadTraceIdSet.add(traceId);
-            }
-
-            if (count % Constants.BUCKET_SIZE == 0) {
-                logger.info("上报 pos {} 的wrongTraceId到backend", pos - 1);
-                // 更新wrongTraceId到backend
-                updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
-            }
-        }
     }
 
     @Override
@@ -119,43 +66,43 @@ public class ClientDataStreamHandler implements Runnable {
             HttpURLConnection httpConnection =
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
             InputStream input = httpConnection.getInputStream();
+            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(input), Constants.INPUT_BUFFER_SIZE);
 
-            BufferedReader bf = new BufferedReader(new InputStreamReader(input), 4096 * 4);
-
-            String line;
-
-            long count = 0;
+            // 行号
+            long lineCount = 0;
             // 第 pos 轮， 不取余
             int pos = 0;
             // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
             int bucketPos = 0;
-
-            HashSet<String> tmpBadTraceIdSet = new HashSet<>(500);
+            Set<String> tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
             TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
             Map<String, Set<String>> traceMap = traceCacheBucket.getData();
+
             // marked as a working bucket
             traceCacheBucket.tryEnter();
 
+            String line;
             // start read stream line by line
-            while ((line = bf.readLine()) != null) {
-                count += 1;
-                pos = (int) count / Constants.BUCKET_SIZE;
-                bucketPos = pos % BUCKET_COUNT;
+            while ((line = bufferedReader.readLine()) != null) {
+                lineCount += 1;
+                pos = (int) lineCount / Constants.BUCKET_SIZE;
+                bucketPos = pos % Constants.CLIENT_BUCKET_COUNT;
 
-                HANDLER_THREAD_POOL.execute(new Worker(line, count, pos,
+                HANDLER_THREAD_POOL.execute(new Worker(line, lineCount, pos,
                         tmpBadTraceIdSet, traceMap));
 
-                if (count % Constants.BUCKET_SIZE == 0) {
+                if (lineCount % Constants.BUCKET_SIZE == 0) {
                     // 切换bucket前先将前一个bucket设置为非工作状态
                     traceCacheBucket.tryQuit();
 
                     // 切换成下一个bucket，并设为工作状态
                     traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+                    // 切换到下一个tmpBadTraceSet
+                    tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+                    // CAS until enter
                     while (!traceCacheBucket.tryEnter()) {}
                     traceMap = traceCacheBucket.getData();
 
-                    // 重置tmpBadTraceSet
-                    tmpBadTraceIdSet = new HashSet<>(500);
                     // TODO 其实这里也可以用producer/consumer优化，但是这里好像触及不到性能瓶颈
                     int retryTimes = 0;
                     while (!traceMap.isEmpty()) {
@@ -179,7 +126,7 @@ public class ClientDataStreamHandler implements Runnable {
             updateWrongTraceId(tmpBadTraceIdSet, pos);
             traceCacheBucket.tryQuit();
 
-            bf.close();
+            bufferedReader.close();
             input.close();
             callFinish();
         } catch (Exception e) {
@@ -204,6 +151,8 @@ public class ClientDataStreamHandler implements Runnable {
             sendWebSocket.sendTextFrame(msg);
             logger.info("成功上报pos {} 的wrongTraceId...", pos);
         }
+        // auto clear after update
+        badTraceIdSet.clear();
     }
 
     /**
@@ -214,10 +163,11 @@ public class ClientDataStreamHandler implements Runnable {
      * @return
      */
     public static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
+        int bucketCount = Constants.CLIENT_BUCKET_COUNT;
         // calculate the three continue pos
-        int curr = pos % BUCKET_COUNT;
-        int prev = (curr - 1 == -1) ? BUCKET_COUNT - 1 : (curr - 1) % BUCKET_COUNT;
-        int next = (curr + 1 == BUCKET_COUNT) ? 0 : (curr + 1) % BUCKET_COUNT;
+        int curr = pos % bucketCount;
+        int prev = (curr - 1 == -1) ? bucketCount - 1 : (curr - 1) % bucketCount;
+        int next = (curr + 1 == bucketCount) ? 0 : (curr + 1) % bucketCount;
 
         logger.info(String.format("开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket中的数据", curr, prev, next));
 
@@ -283,9 +233,57 @@ public class ClientDataStreamHandler implements Runnable {
            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            // return "http://localhost:8080/trace2.data";
+           //  return "http://localhost:8080/trace2.data";
         } else {
             return null;
+        }
+    }
+
+    private class Worker implements Runnable {
+        private final String line;
+        private final long count;
+        private final int pos;
+        private final Set<String> tmpBadTraceIdSet;
+        private final Map<String, Set<String>> traceMap;
+
+        public Worker(final String line, final long count, final int pos,
+                      final Set<String> tmpBadTraceIdSet, final Map<String, Set<String>> traceMap) {
+            this.line = line;
+            this.count = count;
+            this.pos = pos;
+            this.tmpBadTraceIdSet = tmpBadTraceIdSet;
+            this.traceMap = traceMap;
+        }
+
+        @Override
+        public void run() {
+            StringBuilder traceIdBuilder = new StringBuilder();
+            StringBuilder tagsBuilder = new StringBuilder();
+            char[] chars = line.toCharArray();
+            int ICount = 0;
+            for (char tmp : chars) {
+                if (tmp == '|') {
+                    ICount += 1;
+                    continue;
+                }
+                if (ICount == 0) traceIdBuilder.append(tmp);
+                if (ICount == 8) tagsBuilder.append(tmp);
+            }
+            String traceId = traceIdBuilder.toString();
+            String tags = tagsBuilder.toString();
+
+            Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
+            spanList.add(line);
+
+            if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
+                tmpBadTraceIdSet.add(traceId);
+            }
+
+            if (count % Constants.BUCKET_SIZE == 0) {
+                logger.info("上报 pos {} 的wrongTraceId到backend", pos - 1);
+                // 更新wrongTraceId到backend
+                updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
+            }
         }
     }
 }

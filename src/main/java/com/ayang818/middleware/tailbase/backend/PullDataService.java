@@ -30,8 +30,6 @@ public class PullDataService implements Runnable {
     public static LinkedBlockingQueue<TraceIdBucket> blockingQueue =
             new LinkedBlockingQueue<>(100);
 
-    private int prePos = -1;
-
     private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("backend-starter"));
 
@@ -60,7 +58,7 @@ public class PullDataService implements Runnable {
                 }
                 timer += 1;
                 if (timer >= 40) {
-                    // 如果重试次数超过20s，结束评测，免得等很长时间
+                    // 如果重试次数超过20s，说明程序可能有问题，结束评测，免得等很长时间
                     sendCheckSum();
                     break;
                 }
@@ -68,7 +66,6 @@ public class PullDataService implements Runnable {
             }
             // 获取到了bucket，timer置为0
             timer = 0;
-            prePos = bucket.getPos();
             // 发送取到的errTraceId 和 对应的 pos
             Set<String> badTraceIdSet = bucket.getTraceIdSet();
             int pos = bucket.getPos();
