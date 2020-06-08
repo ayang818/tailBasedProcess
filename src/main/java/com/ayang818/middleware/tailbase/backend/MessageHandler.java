@@ -37,7 +37,7 @@ import static com.ayang818.middleware.tailbase.backend.PullDataService.resMap;
 @ChannelHandler.Sharable
 public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
     private static final Logger logger = LoggerFactory.getLogger(MessageHandler.class);
-    private static ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
+    private static final ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
     // calc checksum res thread
     private static final ExecutorService reportThreadPool = Executors.newFixedThreadPool(1,
             new DefaultThreadFactory("report-checkSum"));
@@ -52,7 +52,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     // judge if is receiver channel
     private static final AttributeKey<Boolean> isReceiverChannel = AttributeKey.newInstance("isReceiver");
     // use for md5 calc
-    private static char[] hexDigits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+    private static final char[] HEX_DIGITS = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
     public static void init() {
         for (int i = 0; i < BACKEND_BUCKET_COUNT; i++) {
@@ -242,8 +242,8 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             int k = 0;
             for (int i = 0; i < j; i++) {
                 byte byte0 = md[i];
-                str[k++] = hexDigits[byte0 >>> 4 & 0xf];
-                str[k++] = hexDigits[byte0 & 0xf];
+                str[k++] = HEX_DIGITS[byte0 >>> 4 & 0xf];
+                str[k++] = HEX_DIGITS[byte0 & 0xf];
             }
             return new String(str);
         } catch (Exception e) {

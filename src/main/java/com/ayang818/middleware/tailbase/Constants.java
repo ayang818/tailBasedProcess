@@ -22,7 +22,7 @@ public class Constants {
     // 到达次数，取决于client数量
     public static final int TARGET_PROCESS_COUNT = 2;
     // 4MB
-    public static final int INPUT_BUFFER_SIZE = 1024 * 1024 * 4;
+    public static final int INPUT_BUFFER_SIZE = 1024 * 64;
 
     public static final int UPDATE_TYPE = 0;
     public static final int TRACE_DETAIL = 1;

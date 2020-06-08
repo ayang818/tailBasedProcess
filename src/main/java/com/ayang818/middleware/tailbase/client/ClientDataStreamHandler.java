@@ -9,12 +9,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.io.BufferedReader;
 import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.Reader;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -31,8 +34,13 @@ import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 public class ClientDataStreamHandler implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(ClientDataStreamHandler.class);
-
     private static WebSocket sendWebSocket;
+    // 行号
+    private static long lineCount = 0;
+    // 第 pos 轮， 不取余
+    private static int pos = 0;
+    // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
+    private static int bucketPos = 0;
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
@@ -63,67 +71,68 @@ public class ClientDataStreamHandler implements Runnable {
             HttpURLConnection httpConnection =
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
             InputStream input = httpConnection.getInputStream();
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(input), Constants.INPUT_BUFFER_SIZE);
+            ReadableByteChannel channel = Channels.newChannel(input);
+            Reader reader = Channels.newReader(channel, "UTF8");
 
-            // 行号
-            long lineCount = 0;
-            // 第 pos 轮， 不取余
-            int pos = 0;
-            // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
-            int bucketPos = 0;
-            Set<String> tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+            ByteBuffer byteBuffer = ByteBuffer.allocateDirect(Constants.INPUT_BUFFER_SIZE);
+            CharBuffer charBuffer = byteBuffer.asCharBuffer();
+            char[] chars = new char[Constants.INPUT_BUFFER_SIZE];
+
             TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+            Set<String> tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
             Map<String, Set<String>> traceMap = traceCacheBucket.getData();
 
             // marked as a working bucket
             traceCacheBucket.tryEnter();
+            // use block read
+            StringBuilder lineBuilder = new StringBuilder();
+            while (reader.read(charBuffer) != -1) {
+                charBuffer.flip();
+                int remain = charBuffer.remaining();
+                charBuffer.get(chars, 0, remain);
+                charBuffer.clear();
 
-            String line;
-            // start read stream line by line
-            while ((line = bufferedReader.readLine()) != null) {
-                lineCount += 1;
-                pos = (int) lineCount / Constants.BUCKET_SIZE;
-                bucketPos = pos % Constants.CLIENT_BUCKET_COUNT;
+                for (int i = 0; i < remain; i++) {
+                    if (chars[i] == '\n') {
+                        lineCount += 1;
+                        pos = (int) lineCount / Constants.BUCKET_SIZE;
+                        bucketPos = pos % Constants.CLIENT_BUCKET_COUNT;
 
-                HANDLER_THREAD_POOL.execute(new Worker(line, lineCount, pos,
-                        tmpBadTraceIdSet, traceMap));
+                        String line = lineBuilder.toString();
+                        HANDLER_THREAD_POOL.execute(new Worker(line, lineCount, pos, tmpBadTraceIdSet, traceMap));
+                        lineBuilder.delete(0, lineBuilder.length());
 
-                if (lineCount % Constants.BUCKET_SIZE == 0) {
-                    // 切换bucket前先将前一个bucket设置为非工作状态
-                    traceCacheBucket.tryQuit();
-
-                    // 切换成下一个bucket，并设为工作状态
-                    traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-                    // 切换到下一个tmpBadTraceSet
-                    tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
-                    // CAS until enter
-                    while (!traceCacheBucket.tryEnter()) {}
-                    traceMap = traceCacheBucket.getData();
-
-                    // TODO 其实这里也可以用producer/consumer优化，但是这里好像触及不到性能瓶颈
-                    int retryTimes = 0;
-                    while (!traceMap.isEmpty()) {
-                        logger.info("等待 {} 处 bucket 被消费, 当前进行到 {} pos", bucketPos, pos);
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
+                        // some switch operations is also should be done
+                        if (lineCount % Constants.BUCKET_SIZE == 0) {
+                            // set current bucket as idle status
+                            traceCacheBucket.quit();
+                            traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+                            tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+                            // CAS until enter working status
+                            int retryTimes = 0;
+                            while (!traceCacheBucket.tryEnter() && !traceMap.isEmpty()) {
+                                Thread.sleep(50);
+                                retryTimes += 1;
+                                // 要是重试超过100次(5s)，直接强制解除工作状态，清空并上报
+                                if (retryTimes >= 100) {
+                                    logger.warn("pos {}: bucket 占用时间异常，清空数据并上报 {} 处空数据", pos, pos - Constants.CLIENT_BUCKET_COUNT);
+                                    updateWrongTraceId(new HashSet<>(), pos - Constants.CLIENT_BUCKET_COUNT);
+                                    traceCacheBucket.clear();
+                                    traceCacheBucket.quit();
+                                }
+                            }
+                            traceMap = traceCacheBucket.getData();
                         }
-                        retryTimes += 1;
-                        // 要是重试超过10次(10s)，直接强制清空
-                        if (retryTimes >= 10) {
-                            callFinish();
-                            // logger.warn("强制清空 pos {} 处的bucket", pos);
-                            return ;
-                        }
+                        // ignore LF
+                        continue;
                     }
+                    lineBuilder.append(chars[i]);
                 }
             }
             // last update, clear the badTraceIdSet
             updateWrongTraceId(tmpBadTraceIdSet, pos);
-            traceCacheBucket.tryQuit();
+            traceCacheBucket.quit();
 
-            bufferedReader.close();
             input.close();
             callFinish();
         } catch (Exception e) {
@@ -168,38 +177,36 @@ public class ClientDataStreamHandler implements Runnable {
 
         logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket中的数据", pos, curr, prev, next));
 
-        // a tmp map to collect spans; use ConcurrentHashMap will cause ConcurrentModifiedException?
         Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
         // these traceId data should be collect
-        getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap);
-        getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap);
-        // TODO ConcurrentModificationException, why?
-        getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap);
-
-        // the previous bucket must have been consumed, so free this bucket
-        Map<String, Set<String>> traceBucket = BUCKET_TRACE_LIST.get(prev).getData();
-        traceBucket.clear();
+        getWrongTraceWithBucketPos(prev, wrongTraceIdSet, wrongTraceMap, true);
+        getWrongTraceWithBucketPos(curr, wrongTraceIdSet, wrongTraceMap, false);
+        getWrongTraceWithBucketPos(next, wrongTraceIdSet, wrongTraceMap, false);
 
         return JSON.toJSONString(wrongTraceMap);
     }
 
     /**
      * @param bucketPos
-     * @param pos
      * @param traceIdSet
      * @param wrongTraceMap
+     * @param shouldClear
      */
-    private static void getWrongTraceWithBucketPos(int bucketPos, int pos,
-                                                   Set<String> traceIdSet, Map<String,
-            Set<String>> wrongTraceMap) {
+    private static void getWrongTraceWithBucketPos(int bucketPos, Set<String> traceIdSet, Map<String,
+            Set<String>> wrongTraceMap, boolean shouldClear) {
         // backend start pull these bucket
         TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-        // 当bucket仍然在进行读入工作时，cas尝试交换
-        while (!traceCacheBucket.tryEnter()) {}
+        // when this bucket is still working, cas until it become idle status, and then set as working status
+        while (!traceCacheBucket.tryEnter()) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
         Map<String, Set<String>> traceMap = traceCacheBucket.getData();
         for (String traceId : traceIdSet) {
-            // 主要是这里可能是不断变动的，所以会导致C.M.E
             Set<String> spanList = traceMap.get(traceId);
             if (spanList != null) {
                 // one trace may cross two bucket (e.g bucket size 20000, span1 in line 19999,
@@ -214,7 +221,9 @@ public class ClientDataStreamHandler implements Runnable {
                 }
             }
         }
-        traceCacheBucket.tryQuit();
+        // the previous bucket must have been consumed, so free this bucket
+        if (shouldClear) traceCacheBucket.clear();
+        traceCacheBucket.quit();
     }
 
     private void callFinish() {
@@ -227,9 +236,9 @@ public class ClientDataStreamHandler implements Runnable {
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
             return "http://localhost:8080/trace1.data";
-           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-           // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
             return "http://localhost:8080/trace2.data";
         } else {
             return null;

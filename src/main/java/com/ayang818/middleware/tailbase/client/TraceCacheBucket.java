@@ -27,10 +27,6 @@ public class TraceCacheBucket {
         return data;
     }
 
-    public void setData(Map<String, Set<String>> data) {
-        this.data = data;
-    }
-
     public boolean isWorking() {
         return isWorking.get();
     }
@@ -39,8 +35,11 @@ public class TraceCacheBucket {
         return this.isWorking.compareAndSet(false, true);
     }
 
-    public boolean tryQuit() {
-        return this.isWorking.compareAndSet(true, false);
+    public void quit() {
+        this.isWorking.compareAndSet(true, false);
     }
 
+    public void clear() {
+        this.data.clear();
+    }
 }
