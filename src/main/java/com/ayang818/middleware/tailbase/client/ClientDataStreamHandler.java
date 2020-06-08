@@ -15,6 +15,7 @@ import java.io.Reader;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.channels.Channels;
@@ -88,10 +89,10 @@ public class ClientDataStreamHandler implements Runnable {
             // use block read
             StringBuilder lineBuilder = new StringBuilder();
             while (reader.read(charBuffer) != -1) {
-                charBuffer.flip();
+                ((Buffer) charBuffer).flip();
                 int remain = charBuffer.remaining();
                 charBuffer.get(chars, 0, remain);
-                charBuffer.clear();
+                ((Buffer) charBuffer).clear();
 
                 for (int i = 0; i < remain; i++) {
                     if (chars[i] == '\n') {
