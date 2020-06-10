@@ -1,7 +1,6 @@
 package com.ayang818.middleware.tailbase.client;
 
 import com.alibaba.fastjson.JSON;
-import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import org.asynchttpclient.ws.WebSocket;
@@ -24,6 +23,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
 
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
@@ -38,16 +38,27 @@ public class ClientDataStreamHandler implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(ClientDataStreamHandler.class);
     private static WebSocket sendWebSocket;
     // 行号
-    private static long lineCount = 0;
+    private static volatile long lineCount = 0;
     // 第 pos 轮， 不取余
-    private static int pos = 0;
+    private static volatile int pos = 0;
     // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
-    private static int bucketPos = 0;
+    private static volatile int bucketPos = 0;
+    // bucket list中取到的一个即将进入working state的桶
+    private static volatile TraceCacheBucket traceCacheBucket;
+    // 一个工作周期中记录所有errTraceId
+    private static volatile Set<String> errTraceIdSet;
+    private static volatile Map<String, Set<String>> traceMap;
+    // limit the acquire of char array
+    private static final Semaphore semaphore = new Semaphore(Constants.CHAR_ARRAY_POOL_SIZE);
+    private static final StringBuilder lineBuilder = new StringBuilder();
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new TraceCacheBucket(Constants.CLIENT_BUCKET_MAP_SIZE));
             ERR_TRACE_SET_LIST.add(new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT));
+        }
+        for (int i = 0; i < Constants.CHAR_ARRAY_POOL_SIZE; i++) {
+            CHAR_ARRAY_POOL.add(new char[Constants.INPUT_BUFFER_SIZE]);
         }
     }
 
@@ -78,65 +89,34 @@ public class ClientDataStreamHandler implements Runnable {
 
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(Constants.INPUT_BUFFER_SIZE);
             CharBuffer charBuffer = byteBuffer.asCharBuffer();
-            char[] chars = new char[Constants.INPUT_BUFFER_SIZE];
 
-            TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-            Set<String> tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
-            Map<String, Set<String>> traceMap = traceCacheBucket.getData();
+            traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+            errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+            traceMap = traceCacheBucket.getData();
+            char[] chars;
+            int tmpBufPos = 0;
 
             // marked as a working bucket
             traceCacheBucket.tryEnter();
             // use block read
-            StringBuilder lineBuilder = new StringBuilder();
             while (reader.read(charBuffer) != -1) {
                 ((Buffer) charBuffer).flip();
                 int remain = charBuffer.remaining();
+                // 获取一块缓存
+                semaphore.acquire();
+                // chars = CHAR_ARRAY_POOL.get(tmpBufPos % Constants.CHAR_ARRAY_POOL_SIZE);
+                chars = CHAR_ARRAY_POOL.get(tmpBufPos % Constants.CHAR_ARRAY_POOL_SIZE);
+                tmpBufPos += 1;
                 charBuffer.get(chars, 0, remain);
                 ((Buffer) charBuffer).clear();
 
-                for (int i = 0; i < remain; i++) {
-                    if (chars[i] == '\n') {
-                        lineCount += 1;
-                        pos = (int) lineCount / Constants.BUCKET_SIZE;
-                        bucketPos = pos % Constants.CLIENT_BUCKET_COUNT;
-
-                        String line = lineBuilder.toString();
-                        HANDLER_THREAD_POOL.execute(new Worker(line, lineCount, pos, tmpBadTraceIdSet, traceMap));
-                        lineBuilder.delete(0, lineBuilder.length());
-
-                        // some switch operations is also should be done
-                        if (lineCount % Constants.BUCKET_SIZE == 0) {
-                            // set current bucket as idle status
-                            traceCacheBucket.quit();
-                            traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-                            tmpBadTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
-                            // CAS until enter working status
-                            int retryTimes = 0;
-                            while (!traceCacheBucket.tryEnter() && !traceMap.isEmpty()) {
-                                Thread.sleep(50);
-                                retryTimes += 1;
-                                // 要是重试超过100次(5s)，直接强制解除工作状态，清空并上报
-                                if (retryTimes >= 100) {
-                                    logger.warn("pos {}: bucket 占用时间异常，清空数据并上报 {} 处空数据", pos, pos - Constants.CLIENT_BUCKET_COUNT);
-                                    updateWrongTraceId(new HashSet<>(), pos - Constants.CLIENT_BUCKET_COUNT);
-                                    traceCacheBucket.clear();
-                                    traceCacheBucket.quit();
-                                }
-                            }
-                            traceMap = traceCacheBucket.getData();
-                        }
-                        // ignore LF
-                        continue;
-                    }
-                    lineBuilder.append(chars[i]);
-                }
+                HANDLER_THREAD_POOL.execute(new BlockWorker(chars, remain));
             }
             // last update, clear the badTraceIdSet
-            updateWrongTraceId(tmpBadTraceIdSet, pos);
+            HANDLER_THREAD_POOL.execute(() -> updateWrongTraceId(errTraceIdSet, pos));
             traceCacheBucket.quit();
-
             input.close();
-            callFinish();
+            HANDLER_THREAD_POOL.execute(this::callFinish);
         } catch (Exception e) {
             logger.warn("拉取数据流的过程中产生错误！", e);
         }
@@ -237,34 +217,74 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            // return "http://localhost:8080/trace1.data";
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            // return "http://localhost:8080/trace2.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
     }
 
-    private class Worker implements Runnable {
-        private final String line;
-        private final long count;
-        private final int pos;
-        private final Set<String> tmpBadTraceIdSet;
-        private final Map<String, Set<String>> traceMap;
+    /**
+     * 处理读取出来的一块数据，作为一个worker提交到一个单线程池的任务队列中
+     */
+    private class BlockWorker implements Runnable {
+        char[] chars;
+        int readableSize;
 
-        public Worker(final String line, final long count, final int pos,
-                      final Set<String> tmpBadTraceIdSet, final Map<String, Set<String>> traceMap) {
-            this.line = line;
-            this.count = count;
-            this.pos = pos;
-            this.tmpBadTraceIdSet = tmpBadTraceIdSet;
-            this.traceMap = traceMap;
+        public BlockWorker(char[] chars, int readableSize) {
+            this.chars = chars;
+            this.readableSize = readableSize;
         }
 
         @Override
         public void run() {
+            for (int i = 0; i < readableSize; i++) {
+                if (chars[i] == '\n') {
+                    lineCount += 1;
+
+                    String line = lineBuilder.toString();
+                    handleLine(line);
+                    lineBuilder.delete(0, lineBuilder.length());
+
+                    // some switch operations is also should be done
+                    if (lineCount % Constants.BUCKET_SIZE == 0) {
+                        // set current bucket as idle status
+                        traceCacheBucket.quit();
+                        // switch to next
+                        traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+                        errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+                        // CAS until enter working status
+                        int retryTimes = 0;
+                        while (!traceCacheBucket.tryEnter() && !traceMap.isEmpty()) {
+                            try {
+                                logger.info("无法进行下一工作 pos {}", pos);
+                                Thread.sleep(25);
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
+                            retryTimes += 1;
+                            // 要是重试超过100次(5s)，直接强制解除工作状态，清空并上报
+                            if (retryTimes >= 200) {
+                                logger.warn("pos {}: bucket 占用时间异常，清空数据并上报 {} 处空数据", pos, pos - Constants.CLIENT_BUCKET_COUNT);
+                                updateWrongTraceId(new HashSet<>(), pos - Constants.CLIENT_BUCKET_COUNT);
+                                traceCacheBucket.clear();
+                                traceCacheBucket.quit();
+                            }
+                        }
+                        traceMap = traceCacheBucket.getData();
+                    }
+                    // ignore LF
+                    continue;
+                }
+                lineBuilder.append(chars[i]);
+            }
+            semaphore.release();
+        }
+
+        public void handleLine(String line) {
             StringBuilder traceIdBuilder = new StringBuilder();
             StringBuilder tagsBuilder = new StringBuilder();
             char[] chars = line.toCharArray();
@@ -284,12 +304,16 @@ public class ClientDataStreamHandler implements Runnable {
             spanList.add(line);
 
             if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
-                tmpBadTraceIdSet.add(traceId);
+                errTraceIdSet.add(traceId);
             }
 
-            if (count % Constants.BUCKET_SIZE == 0) {
+            if (lineCount % Constants.BUCKET_SIZE == 0) {
+                // 更新这两个offset
+                pos = (int) lineCount / Constants.BUCKET_SIZE;
+                bucketPos = pos % Constants.CLIENT_BUCKET_COUNT;
+
                 // 更新wrongTraceId到backend
-                updateWrongTraceId(tmpBadTraceIdSet, pos - 1);
+                updateWrongTraceId(errTraceIdSet, pos - 1);
             }
         }
     }

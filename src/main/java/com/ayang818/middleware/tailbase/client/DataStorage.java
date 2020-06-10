@@ -19,6 +19,8 @@ public class DataStorage {
 
     public static List<Set<String>> ERR_TRACE_SET_LIST = new ArrayList<>(Constants.CLIENT_BUCKET_COUNT);
 
+    public static List<char[]> CHAR_ARRAY_POOL = new ArrayList<>(100);
+
     public static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60,
             TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("client_starter"));
