@@ -207,15 +207,18 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         StringBuilder startTimeBuilder = new StringBuilder();
         char[] chars = span.toCharArray();
         int ICount = 0;
-        for (char tmp : chars) {
-            if (tmp == '|') {
+        int startTimeStartPos = 0;
+        for (int i = 0; i < chars.length; i++) {
+            if (chars[i] == '|') {
                 ICount += 1;
+                if (ICount == 1) {
+                    startTimeStartPos = i + 1;
+                }
                 if (ICount == 2) {
+                    startTimeBuilder.append(chars, startTimeStartPos, i - startTimeStartPos);
                     return BaseUtils.toLong(startTimeBuilder.toString(), -1);
                 }
-                continue;
             }
-            if (ICount == 1) startTimeBuilder.append(tmp);
         }
         return -1;
     }

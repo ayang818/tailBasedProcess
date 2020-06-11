@@ -59,6 +59,7 @@ public class PullDataService implements Runnable {
                 timer += 1;
                 if (timer >= 40) {
                     // 如果重试次数超过20s，说明程序可能有问题，结束评测，免得等很长时间
+                    logger.info("重试时间超过20s，直接发送checkSum");
                     sendCheckSum();
                     break;
                 }

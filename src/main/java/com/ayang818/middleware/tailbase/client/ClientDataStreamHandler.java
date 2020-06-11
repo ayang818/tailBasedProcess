@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
@@ -61,6 +65,11 @@ public class ClientDataStreamHandler implements Runnable {
         for (int i = 0; i < Constants.CHAR_ARRAY_POOL_SIZE; i++) {
             CHAR_ARRAY_POOL.add(new char[Constants.INPUT_BUFFER_SIZE]);
         }
+        HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(1000000),
+                new DefaultThreadFactory("line-handler"),
+                new ThreadPoolExecutor.CallerRunsPolicy());
     }
 
     public static void start() {
@@ -105,7 +114,6 @@ public class ClientDataStreamHandler implements Runnable {
                 int remain = charBuffer.remaining();
                 // 获取一块缓存
                 semaphore.acquire();
-                // chars = CHAR_ARRAY_POOL.get(tmpBufPos % Constants.CHAR_ARRAY_POOL_SIZE);
                 chars = CHAR_ARRAY_POOL.get(tmpBufPos % Constants.CHAR_ARRAY_POOL_SIZE);
                 tmpBufPos += 1;
                 charBuffer.get(chars, 0, remain);
@@ -218,11 +226,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            return "http://localhost:8080/trace1.data";
-            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            // return "http://localhost:8080/trace1.data";
+            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            return "http://localhost:8080/trace2.data";
+            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            // return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
@@ -292,15 +300,21 @@ public class ClientDataStreamHandler implements Runnable {
         public void handleLine(String line) {
             StringBuilder traceIdBuilder = new StringBuilder();
             StringBuilder tagsBuilder = new StringBuilder();
-            char[] chars = line.toCharArray();
+            char[] lineChars = line.toCharArray();
             int ICount = 0;
-            for (char tmp : chars) {
-                if (tmp == '|') {
+            int tagsStartPos = 0;
+            for (int i = 0; i < lineChars.length; i++) {
+                if (lineChars[i] == '|') {
                     ICount += 1;
-                    continue;
+                    if (ICount == 1) {
+                        traceIdBuilder.append(lineChars, 0, i);
+                    }
+                    if (ICount == 8) {
+                        tagsStartPos = i + 1;
+                        tagsBuilder.append(lineChars, tagsStartPos, lineChars.length - tagsStartPos);
+                        break;
+                    }
                 }
-                if (ICount == 0) traceIdBuilder.append(tmp);
-                if (ICount == 8) tagsBuilder.append(tmp);
             }
             String traceId = traceIdBuilder.toString();
             String tags = tagsBuilder.toString();

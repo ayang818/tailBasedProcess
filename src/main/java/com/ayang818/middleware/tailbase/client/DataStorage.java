@@ -4,10 +4,7 @@ import com.ayang818.middleware.tailbase.Constants;
 import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * @author 杨丰畅
@@ -25,8 +22,5 @@ public class DataStorage {
             TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("client_starter"));
 
-    public static final ExecutorService HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
-            TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(1000000), new DefaultThreadFactory("line-handler"),
-            new ThreadPoolExecutor.CallerRunsPolicy());
+    public static ExecutorService HANDLER_THREAD_POOL;
 }
