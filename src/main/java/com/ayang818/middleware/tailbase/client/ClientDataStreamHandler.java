@@ -67,7 +67,7 @@ public class ClientDataStreamHandler implements Runnable {
         }
         HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
                 TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(1000000),
+                new ArrayBlockingQueue<>(500000),
                 new DefaultThreadFactory("line-handler"),
                 new ThreadPoolExecutor.CallerRunsPolicy());
     }

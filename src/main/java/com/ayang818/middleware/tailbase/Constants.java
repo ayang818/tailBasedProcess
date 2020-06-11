@@ -14,7 +14,7 @@ public class Constants {
     public static final int BUCKET_SIZE = 20000;
     // client下bucket的数量
     public static final int CLIENT_BUCKET_COUNT = 30;
-    // tmp read buffer pool size, 1000 means 64MB * 16 = 1024MB
+    // tmp read buffer pool size, 1000 means 64MB * 16 = 1024MB / pre 600MB
     public static final int CHAR_ARRAY_POOL_SIZE = 1024 * 16;
     // backend下bucket的数量
     public static final int BACKEND_BUCKET_COUNT = 100;
