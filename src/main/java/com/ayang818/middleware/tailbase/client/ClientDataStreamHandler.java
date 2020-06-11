@@ -110,14 +110,13 @@ public class ClientDataStreamHandler implements Runnable {
                 tmpBufPos += 1;
                 charBuffer.get(chars, 0, remain);
                 ((Buffer) charBuffer).clear();
-
                 HANDLER_THREAD_POOL.execute(new BlockWorker(chars, remain));
             }
             // last update, clear the badTraceIdSet
             HANDLER_THREAD_POOL.execute(() -> updateWrongTraceId(errTraceIdSet, pos));
-            traceCacheBucket.quit();
-            input.close();
+            HANDLER_THREAD_POOL.execute(() -> traceCacheBucket.quit());
             HANDLER_THREAD_POOL.execute(this::callFinish);
+            input.close();
         } catch (Exception e) {
             logger.warn("拉取数据流的过程中产生错误！", e);
         }
@@ -162,6 +161,7 @@ public class ClientDataStreamHandler implements Runnable {
 
         Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
+        // TODO 卡顿
         // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, wrongTraceIdSet, wrongTraceMap, true);
         getWrongTraceWithBucketPos(curr, wrongTraceIdSet, wrongTraceMap, false);
@@ -218,11 +218,11 @@ public class ClientDataStreamHandler implements Runnable {
         String port = System.getProperty("server.port", "8080");
         // TODO 生产环境切换端口
         if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            // return "http://localhost:8080/trace1.data";
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
+            return "http://localhost:8080/trace1.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace1.data";
         } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
-            // return "http://localhost:8080/trace2.data";
+            // return "http://localhost:" + CommonController.getDataSourcePort() + "/trace2.data";
+            return "http://localhost:8080/trace2.data";
         } else {
             return null;
         }
@@ -242,10 +242,14 @@ public class ClientDataStreamHandler implements Runnable {
 
         @Override
         public void run() {
+            int preBlockPos = 0;
+            int blockPos = -1;
             for (int i = 0; i < readableSize; i++) {
                 if (chars[i] == '\n') {
+                    preBlockPos = blockPos + 1;
+                    blockPos = i;
+                    lineBuilder.append(chars, preBlockPos, blockPos - preBlockPos);
                     lineCount += 1;
-
                     String line = lineBuilder.toString();
                     handleLine(line);
                     lineBuilder.delete(0, lineBuilder.length());
@@ -277,10 +281,10 @@ public class ClientDataStreamHandler implements Runnable {
                         }
                         traceMap = traceCacheBucket.getData();
                     }
-                    // ignore LF
-                    continue;
                 }
-                lineBuilder.append(chars[i]);
+            }
+            if (readableSize - 1 >= blockPos + 1) {
+                lineBuilder.append(chars, blockPos + 1, readableSize - blockPos - 1);
             }
             semaphore.release();
         }

@@ -14,8 +14,8 @@ public class Constants {
     public static final int BUCKET_SIZE = 20000;
     // client下bucket的数量
     public static final int CLIENT_BUCKET_COUNT = 30;
-    // tmp read buffer pool size, 1000 means 64MB * 4 256MB
-    public static final int CHAR_ARRAY_POOL_SIZE = 4000;
+    // tmp read buffer pool size, 1000 means 64MB * 10 = 600MB
+    public static final int CHAR_ARRAY_POOL_SIZE = 1024 * 10;
     // backend下bucket的数量
     public static final int BACKEND_BUCKET_COUNT = 100;
     // 保守估计每个traceId下只有2条数据

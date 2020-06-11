@@ -70,14 +70,16 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         switch (type) {
             case Constants.UPDATE_TYPE:
                 Set<String> badTraceIdSet = jsonObject.getObject("badTraceIdSet",
-                        new TypeReference<Set<String>>() {});
+                        new TypeReference<Set<String>>() {
+                        });
                 int pos = jsonObject.getObject("pos", Integer.class);
                 // logger.info("收到client pos {} 的update", pos);
                 setWrongTraceId(badTraceIdSet, pos);
                 break;
             case Constants.TRACE_DETAIL:
                 Map<String, List<String>> spans = jsonObject.getObject("data",
-                    new TypeReference<Map<String, List<String>>>(){});
+                        new TypeReference<Map<String, List<String>>>() {
+                        });
                 // pull data from this pos, here is for a recent ack!
                 int dataPos = jsonObject.getObject("dataPos", Integer.class);
                 consumeTraceDetails(spans, dataPos);
@@ -88,7 +90,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 break;
             case Constants.CHANNEL_TYPE:
                 Integer channelType = jsonObject.getObject("channelType", Integer.class);
-                if (channelType == null) return ;
+                if (channelType == null) return;
                 boolean isRecv = (channelType == Constants.RECEIVER_TYPE);
                 ctx.channel().attr(isReceiverChannel).set(isRecv);
                 logger.info("注册为 {} channel", isRecv ? "接收信息" : "发送信息");
@@ -145,6 +147,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     /**
      * 向client发送拉取数据的请求
+     *
      * @param traceIdListString
      * @param pos
      */
@@ -161,6 +164,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     /**
      * 将client主动推送过来的错误traceIdList，放置到backend 等待消费的 对应位置的 bucket 中
+     *
      * @param badTraceIdSet
      * @param pos
      */
@@ -177,13 +181,14 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             // logger.info(String.format("pos %d 位置的 bucket 访问次数到达 %d", pos, processCount));
             // 使用阻塞队列优化，如果processCount >= TARGET_PROCESS_COUNT，那么推入消费队列，等待消费
             if (processCount >= TARGET_PROCESS_COUNT) {
-               PullDataService.blockingQueue.offer(traceIdBucket);
+                PullDataService.blockingQueue.offer(traceIdBucket);
             }
         }
     }
 
     /**
      * 是否结束，是否可以向评测程序发送答案
+     *
      * @return
      */
     public static boolean isFin() {
@@ -253,6 +258,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     /**
      * 获取一个可以被消费的bucket
+     *
      * @param startPos 上一次被消费的bucket所在的位置 + 1，既然上一个位置刚刚被消费，那么下一个位置可以被消费的概率也很大，
      *                 而且可以及时释放client端对应bucket
      * @return

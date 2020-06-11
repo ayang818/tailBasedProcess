@@ -29,7 +29,7 @@ public class WSStarter {
 
     public void run() {
         EventLoopGroup bossGroup = new NioEventLoopGroup();
-        EventLoopGroup workerGroup = new NioEventLoopGroup(2);
+        EventLoopGroup workerGroup = new NioEventLoopGroup(4);
 
         ServerBootstrap server = new ServerBootstrap();
         server.group(bossGroup, workerGroup)
@@ -41,7 +41,7 @@ public class WSStarter {
 
                         pipeline.addLast(new HttpServerCodec());
                         pipeline.addLast(new ChunkedWriteHandler());
-                        pipeline.addLast(new HttpObjectAggregator( 100 * 1024 * 1024, false));
+                        pipeline.addLast(new HttpObjectAggregator(100 * 1024 * 1024, false));
 
                         pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null, false, 409600));
                         messageHandler = new MessageHandler();
