@@ -53,8 +53,8 @@ public class MainStarter {
 
     private static void start() {
         ServerBootstrap bootstrap = new ServerBootstrap();
-        EventLoopGroup boss = new NioEventLoopGroup();
-        EventLoopGroup work = new NioEventLoopGroup();
+        EventLoopGroup boss = new NioEventLoopGroup(1);
+        EventLoopGroup work = new NioEventLoopGroup(1);
         bootstrap.group(boss, work)
                 // .handler(new LoggingHandler(LogLevel.INFO))
                 .channel(NioServerSocketChannel.class)

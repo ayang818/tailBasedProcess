@@ -56,7 +56,7 @@ public class ClientDataStreamHandler implements Runnable {
         }
         HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
                 TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(500000),
+                new ArrayBlockingQueue<>(10000),
                 new DefaultThreadFactory("line-handler"),
                 new ThreadPoolExecutor.CallerRunsPolicy());
     }
@@ -147,7 +147,8 @@ public class ClientDataStreamHandler implements Runnable {
         int prev = (curr - 1 == -1) ? bucketCount - 1 : (curr - 1) % bucketCount;
         int next = (curr + 1 == bucketCount) ? 0 : (curr + 1) % bucketCount;
 
-        logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 bucket中的数据", pos, curr, prev, next));
+        logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
+                "bucket中的数据", pos, curr, prev, next));
 
         Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
@@ -165,14 +166,16 @@ public class ClientDataStreamHandler implements Runnable {
      * @param wrongTraceMap
      * @param shouldClear
      */
-    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, Set<String> traceIdSet, Map<String,
+    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, Set<String> traceIdSet
+            , Map<String,
             Set<String>> wrongTraceMap, boolean shouldClear) {
         // backend start pull these bucket
         TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-        // when this bucket is still working, cas until it become idle status, and then set as working status
+        // when this bucket is still working, cas until it become idle status, and then set as
+        //working status
         while (!traceCacheBucket.tryEnter()) {
             try {
-                Thread.sleep(10);
+                Thread.sleep(15);
                 logger.info("等待进入bucket {}", pos);
             } catch (InterruptedException e) {
                 e.printStackTrace();
@@ -231,14 +234,19 @@ public class ClientDataStreamHandler implements Runnable {
     private class BlockWorker implements Runnable {
         char[] chars;
         int readableSize;
+        byte[] bytes;
 
         public BlockWorker(byte[] bytes, int readableSize) {
-            this.chars = new String(bytes).toCharArray();
+            this.bytes = bytes;
+            // TODO 创建该对象时这个耗时在处理线程中还是IO线程中？
+            // this.chars = new String(bytes).toCharArray();
             this.readableSize = readableSize;
         }
 
         @Override
         public void run() {
+            chars = new String(bytes).toCharArray();
+
             int preBlockPos = 0;
             int blockPos = -1;
             for (int i = 0; i < readableSize; i++) {
@@ -270,8 +278,10 @@ public class ClientDataStreamHandler implements Runnable {
                             retryTimes += 1;
                             // 要是重试超过100次(5s)，直接强制解除工作状态，清空并上报
                             if (retryTimes >= 200) {
-                                logger.warn("pos {}: bucket 占用时间异常，清空数据并上报 {} 处空数据", pos, pos - Constants.CLIENT_BUCKET_COUNT);
-                                updateWrongTraceId(new HashSet<>(), pos - Constants.CLIENT_BUCKET_COUNT);
+                                logger.warn("pos {}: bucket 占用时间异常，清空数据并上报 {} 处空数据", pos,
+                                        pos - Constants.CLIENT_BUCKET_COUNT);
+                                updateWrongTraceId(new HashSet<>(),
+                                        pos - Constants.CLIENT_BUCKET_COUNT);
                                 traceCacheBucket.clear();
                                 traceCacheBucket.quit();
                             }
@@ -299,7 +309,8 @@ public class ClientDataStreamHandler implements Runnable {
                     }
                     if (ICount == 8) {
                         tagsStartPos = i + 1;
-                        tagsBuilder.append(lineChars, tagsStartPos, lineChars.length - tagsStartPos);
+                        tagsBuilder.append(lineChars, tagsStartPos,
+                                lineChars.length - tagsStartPos);
                         break;
                     }
                 }
