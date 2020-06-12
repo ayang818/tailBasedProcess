@@ -158,9 +158,9 @@ public class ClientDataStreamHandler implements Runnable {
 
         // TODO 卡顿
         // these traceId data should be collect
-        getWrongTraceWithBucketPos(prev, wrongTraceIdSet, wrongTraceMap, true);
-        getWrongTraceWithBucketPos(curr, wrongTraceIdSet, wrongTraceMap, false);
-        getWrongTraceWithBucketPos(next, wrongTraceIdSet, wrongTraceMap, false);
+        getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap, true);
+        getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap, false);
+        getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap, false);
 
         return JSON.toJSONString(wrongTraceMap);
     }
@@ -171,14 +171,15 @@ public class ClientDataStreamHandler implements Runnable {
      * @param wrongTraceMap
      * @param shouldClear
      */
-    private static void getWrongTraceWithBucketPos(int bucketPos, Set<String> traceIdSet, Map<String,
+    private static void getWrongTraceWithBucketPos(int bucketPos, int pos, Set<String> traceIdSet, Map<String,
             Set<String>> wrongTraceMap, boolean shouldClear) {
         // backend start pull these bucket
         TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
         // when this bucket is still working, cas until it become idle status, and then set as working status
         while (!traceCacheBucket.tryEnter()) {
             try {
-                Thread.sleep(50);
+                Thread.sleep(10);
+                logger.info("等待进入bucket {}", pos);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
