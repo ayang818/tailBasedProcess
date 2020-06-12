@@ -10,13 +10,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
-import java.io.Reader;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.HashMap;
@@ -24,7 +22,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -86,26 +83,25 @@ public class ClientDataStreamHandler implements Runnable {
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
             InputStream input = httpConnection.getInputStream();
             ReadableByteChannel channel = Channels.newChannel(input);
-            Reader reader = Channels.newReader(channel, "UTF8");
 
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(Constants.INPUT_BUFFER_SIZE);
-            CharBuffer charBuffer = byteBuffer.asCharBuffer();
 
             traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
             errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
             traceMap = traceCacheBucket.getData();
-            char[] chars;
+            byte[] bytes;
 
             // marked as a working bucket
             traceCacheBucket.tryEnter();
             // use block read
-            while (reader.read(charBuffer) != -1) {
-                ((Buffer) charBuffer).flip();
-                int remain = charBuffer.remaining();
-                chars = new char[remain];
-                charBuffer.get(chars, 0, remain);
-                ((Buffer) charBuffer).clear();
-                HANDLER_THREAD_POOL.execute(new BlockWorker(chars, remain));
+            while (channel.read(byteBuffer) != -1) {
+                ((Buffer) byteBuffer).flip();
+                int remain = byteBuffer.remaining();
+                bytes = new byte[remain];
+                byteBuffer.get(bytes, 0, remain);
+                ((Buffer) byteBuffer).clear();
+
+                HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
             }
             // last update, clear the badTraceIdSet
             HANDLER_THREAD_POOL.execute(() -> updateWrongTraceId(errTraceIdSet, pos));
@@ -209,15 +205,23 @@ public class ClientDataStreamHandler implements Runnable {
 
     private String getPath() {
         String port = System.getProperty("server.port", "8080");
-        // TODO 生产环境切换端口
-        if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-            // return "http://localhost:8080/trace1.data";
-            return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace1.data";
-        } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-            return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace2.data";
-            // return "http://localhost:8080/trace2.data";
+        String env = System.getProperty("server.env", "prod");
+        if ("prod".equals(env)) {
+            if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
+                return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace1.data";
+            } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
+                return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace2.data";
+            } else {
+                return null;
+            }
         } else {
-            return null;
+            if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
+                return "http://localhost:8080/trace1.data";
+            } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
+                return "http://localhost:8080/trace2.data";
+            } else {
+                return null;
+            }
         }
     }
 
@@ -228,8 +232,8 @@ public class ClientDataStreamHandler implements Runnable {
         char[] chars;
         int readableSize;
 
-        public BlockWorker(char[] chars, int readableSize) {
-            this.chars = chars;
+        public BlockWorker(byte[] bytes, int readableSize) {
+            this.chars = new String(bytes).toCharArray();
             this.readableSize = readableSize;
         }
 
