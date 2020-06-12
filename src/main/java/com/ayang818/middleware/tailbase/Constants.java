@@ -21,8 +21,8 @@ public class Constants {
     public static final int BUCKET_ERR_TRACE_COUNT = 20;
     // 到达次数，取决于client数量
     public static final int TARGET_PROCESS_COUNT = 2;
-    // 512KB 256KB 128KB 64KB 32KB 16KB 4KB 慢慢调
-    public static final int INPUT_BUFFER_SIZE = 1024 * 32;
+    // 512KB 256KB 128KB 64KB 32KB 16KB 8KB 4KB 慢慢调
+    public static final int INPUT_BUFFER_SIZE = 1024 * 8;
 
     public static final int UPDATE_TYPE = 0;
     public static final int TRACE_DETAIL = 1;
