@@ -1,15 +1,12 @@
 package com.ayang818.middleware.tailbase.client;
 
 import com.alibaba.fastjson.JSON;
-import com.ayang818.middleware.tailbase.CommonController;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.io.InputStream;
 import java.io.Reader;
@@ -37,11 +34,10 @@ import static com.ayang818.middleware.tailbase.client.DataStorage.*;
  * @description client 端用于处理读入数据流，向 backend 发送对应请求的类
  * @date 2020/5/5 12:47
  **/
-@Service
 public class ClientDataStreamHandler implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(ClientDataStreamHandler.class);
-    private static WebSocket sendWebSocket;
+    public static WebSocket websocket;
     // 行号
     private static volatile long lineCount = 0;
     // 第 pos 轮， 不取余
@@ -53,17 +49,12 @@ public class ClientDataStreamHandler implements Runnable {
     // 一个工作周期中记录所有errTraceId
     private static volatile Set<String> errTraceIdSet;
     private static volatile Map<String, Set<String>> traceMap;
-    // limit the acquire of char array
-    private static final Semaphore semaphore = new Semaphore(Constants.CHAR_ARRAY_POOL_SIZE);
     private static final StringBuilder lineBuilder = new StringBuilder();
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new TraceCacheBucket(Constants.CLIENT_BUCKET_MAP_SIZE));
             ERR_TRACE_SET_LIST.add(new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT));
-        }
-        for (int i = 0; i < Constants.CHAR_ARRAY_POOL_SIZE; i++) {
-            CHAR_ARRAY_POOL.add(new char[Constants.INPUT_BUFFER_SIZE]);
         }
         HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
                 TimeUnit.SECONDS,
@@ -79,12 +70,11 @@ public class ClientDataStreamHandler implements Runnable {
     @Override
     public void run() {
         try {
-            sendWebSocket = WsClient.getSendWebsocketClient();
-            WsClient.getReceiveWebsocketClient();
+            websocket = WsClient.getWebsocketClient();
 
             String path = getPath();
             // process data on client, not server
-            if (StringUtils.isEmpty(path)) {
+            if (path == null || "".equals(path)) {
                 logger.warn("path is empty");
                 return;
             }
@@ -104,7 +94,6 @@ public class ClientDataStreamHandler implements Runnable {
             errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
             traceMap = traceCacheBucket.getData();
             char[] chars;
-            int tmpBufPos = 0;
 
             // marked as a working bucket
             traceCacheBucket.tryEnter();
@@ -112,10 +101,7 @@ public class ClientDataStreamHandler implements Runnable {
             while (reader.read(charBuffer) != -1) {
                 ((Buffer) charBuffer).flip();
                 int remain = charBuffer.remaining();
-                // 获取一块缓存
-                semaphore.acquire();
-                chars = CHAR_ARRAY_POOL.get(tmpBufPos % Constants.CHAR_ARRAY_POOL_SIZE);
-                tmpBufPos += 1;
+                chars = new char[remain];
                 charBuffer.get(chars, 0, remain);
                 ((Buffer) charBuffer).clear();
                 HANDLER_THREAD_POOL.execute(new BlockWorker(chars, remain));
@@ -144,7 +130,7 @@ public class ClientDataStreamHandler implements Runnable {
             // send badTraceIdList and its pos to the backend
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
                     , Constants.UPDATE_TYPE, json, pos);
-            sendWebSocket.sendTextFrame(msg);
+            websocket.sendTextFrame(msg);
             logger.info("成功上报pos {} 的wrongTraceId...", pos);
         }
         // auto clear after update
@@ -218,7 +204,7 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     private void callFinish() {
-        sendWebSocket.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE));
+        websocket.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE));
         logger.info("已发送 FIN 请求");
     }
 
@@ -294,7 +280,6 @@ public class ClientDataStreamHandler implements Runnable {
             if (readableSize - 1 >= blockPos + 1) {
                 lineBuilder.append(chars, blockPos + 1, readableSize - blockPos - 1);
             }
-            semaphore.release();
         }
 
         public void handleLine(String line) {

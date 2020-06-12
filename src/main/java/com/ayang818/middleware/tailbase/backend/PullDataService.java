@@ -1,7 +1,7 @@
 package com.ayang818.middleware.tailbase.backend;
 
 import com.alibaba.fastjson.JSON;
-import com.ayang818.middleware.tailbase.CommonController;
+import com.ayang818.middleware.tailbase.BasicHttpHandler;
 import com.ayang818.middleware.tailbase.utils.BaseUtils;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import okhttp3.FormBody;
@@ -41,6 +41,7 @@ public class PullDataService implements Runnable {
 
     @Override
     public void run() {
+        while (BasicHttpHandler.getDataSourcePort() == null) {}
         while (true) {
             TraceIdBucket bucket = null;
             try {
@@ -83,8 +84,8 @@ public class PullDataService implements Runnable {
             String result = JSON.toJSONString(resMap);
             RequestBody body = new FormBody.Builder()
                     .add("result", result).build();
-            String url = String.format("http://localhost:%d/api/finished",
-                    CommonController.getDataSourcePort());
+            String url = String.format("http://localhost:%s/api/finished",
+                    BasicHttpHandler.getDataSourcePort());
             Request request = new Request.Builder().url(url).post(body).build();
             Response response = BaseUtils.callHttp(request);
             if (response.isSuccessful()) {

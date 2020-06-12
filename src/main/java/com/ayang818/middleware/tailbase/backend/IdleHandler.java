@@ -5,7 +5,6 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
-import org.springframework.stereotype.Component;
 
 /**
  * @author 杨丰畅
@@ -13,7 +12,6 @@ import org.springframework.stereotype.Component;
  * @date 2020/5/16 19:42
  **/
 @ChannelHandler.Sharable
-@Component
 public class IdleHandler extends ChannelDuplexHandler {
 
     @Override

@@ -49,8 +49,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(200);
     // lock list
     private static final Object[] LOCK_LIST = new Object[BACKEND_BUCKET_COUNT];
-    // judge if is receiver channel
-    private static final AttributeKey<Boolean> isReceiverChannel = AttributeKey.newInstance("isReceiver");
     // use for md5 calc
     private static final char[] HEX_DIGITS = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
@@ -87,13 +85,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
                 logger.info("收到 {} 次 Fin请求", finTime);
-                break;
-            case Constants.CHANNEL_TYPE:
-                Integer channelType = jsonObject.getObject("channelType", Integer.class);
-                if (channelType == null) return;
-                boolean isRecv = (channelType == Constants.RECEIVER_TYPE);
-                ctx.channel().attr(isReceiverChannel).set(isRecv);
-                logger.info("注册为 {} channel", isRecv ? "接收信息" : "发送信息");
                 break;
             default:
                 break;
@@ -154,11 +145,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     public static void pullWrongTraceDetails(String traceIdListString, int pos) {
         String msg = String.format("{\"type\": %d, \"traceIdSet\": %s, \"pos\": %d}",
                 Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, pos);
-        channels.parallelStream().forEach(channel -> {
-            if (channel.attr(isReceiverChannel).get()) {
-                channel.writeAndFlush(new TextWebSocketFrame(msg));
-            }
-        });
+        channels.writeAndFlush(new TextWebSocketFrame(msg));
         logger.info("发送拉取 {} pos处 bucket data请求.....", pos);
     }
 
@@ -309,11 +296,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             int bucketPos = traceIdBucket.getPos();
             String msg = String.format("{\"type\": %d, \"traceIdSet\": %s, \"bucketPos\": %d}",
                     Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, bucketPos);
-            channels.parallelStream().forEach(channel -> {
-                if (channel.attr(isReceiverChannel).get()) {
-                    channel.writeAndFlush(new TextWebSocketFrame(msg));
-                }
-            });
+            channels.writeAndFlush(new TextWebSocketFrame(msg));
         }
     }
 

@@ -21,16 +21,11 @@ public class Constants {
     public static final int BUCKET_ERR_TRACE_COUNT = 20;
     // 到达次数，取决于client数量
     public static final int TARGET_PROCESS_COUNT = 2;
-    // 512KB/2048 256KB/4096 128KB/8192 64KB/16384 32KB/32768 16KB/65536 慢慢调吧/其实可以使用连续的大数组
-    public static final int INPUT_BUFFER_SIZE = 1024 * 32;
-    // keep 1G
-    public static final int CHAR_ARRAY_POOL_SIZE = 32768;
+    // 512KB 256KB 128KB 64KB 32KB 16KB 4KB 慢慢调
+    public static final int INPUT_BUFFER_SIZE = 1024 * 64;
 
     public static final int UPDATE_TYPE = 0;
     public static final int TRACE_DETAIL = 1;
     public static final int FIN_TYPE = 2;
-    public static final int CHANNEL_TYPE = 3;
-    public static final int SENDER_TYPE = 0;
-    public static final int RECEIVER_TYPE = 1;
     public static final int PULL_TRACE_DETAIL_TYPE = 0;
 }

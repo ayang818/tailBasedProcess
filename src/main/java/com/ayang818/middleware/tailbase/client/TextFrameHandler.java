@@ -46,7 +46,7 @@ public class TextFrameHandler {
                             String msg = String.format("{\"type\": %d, \"data\": %s, " +
                                             "\"dataPos\": %d}",
                                     Constants.TRACE_DETAIL, wrongTraceDetails, pos);
-                            WsClient.getSendWebsocketClient().sendTextFrame(msg);
+                            ClientDataStreamHandler.websocket.sendTextFrame(msg);
                             break;
                         default:
                             break;
