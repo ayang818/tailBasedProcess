@@ -125,7 +125,6 @@ public class ClientDataStreamHandler implements Runnable {
      * @param pos
      */
     private void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
-        // TODO ConcurrentModificationException
         String json = JSON.toJSONString(badTraceIdSet);
         if (badTraceIdSet.size() > 0) {
             // send badTraceIdList and its pos to the backend
@@ -156,7 +155,6 @@ public class ClientDataStreamHandler implements Runnable {
 
         Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
 
-        // TODO 卡顿
         // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap, true);
         getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap, false);
@@ -193,7 +191,6 @@ public class ClientDataStreamHandler implements Runnable {
                 //in line 20001)
                 Set<String> existSpanList = wrongTraceMap.get(traceId);
                 if (existSpanList != null) {
-                    // TODO caused, fixed waited，这里的报错的原因应该是应该是
                     existSpanList.addAll(spanList);
                 } else {
                     wrongTraceMap.put(traceId, spanList);
