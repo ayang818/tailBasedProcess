@@ -56,7 +56,7 @@ public class ClientDataStreamHandler implements Runnable {
         }
         HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 30,
                 TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(30000),
+                new LinkedBlockingQueue<>(),
                 new DefaultThreadFactory("line-handler"),
                 new ThreadPoolExecutor.AbortPolicy());
     }
