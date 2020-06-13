@@ -18,10 +18,7 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.*;
 
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
@@ -37,23 +34,27 @@ public class ClientDataStreamHandler implements Runnable {
     public static WebSocket websocket;
     // 行号
     private static volatile long lineCount = 0;
-    // 第 pos 轮， 不取余
+    // 大桶的 pos 不取余，每 Constants.UPDATE_INTERVAL 行，切换大桶
     private static volatile int pos = 0;
-    // bucketPos 在bucketList中的位置，pos % BUCKET_COUNT
-    private static volatile int bucketPos = 0;
-    // bucket list中取到的一个即将进入working state的桶
-    private static volatile TraceCacheBucket traceCacheBucket;
+    // 小桶的 pos ，不需要取余, MAX < Constants.CLIENT_SMALL_BUCKET_SIZE, 、
+    // 每读 Constants.SWITCH_SMALL_BUCKET_INTERVAL 行，切换小桶
+    private static volatile int innerPos = 0;
+    // pos % BIG_BUCKET_COUNT
+    private static volatile int bigBucketPos = 0;
+    private static volatile BigBucket bigBucket;
+    private static volatile SmallBucket smallBucket;
     // 一个工作周期中记录所有errTraceId
     private static volatile Set<String> errTraceIdSet;
-    private static volatile Map<String, Set<String>> traceMap;
+
     private static final StringBuilder lineBuilder = new StringBuilder();
     private static volatile boolean firstSetPriority = true;
     private static Semaphore semaphore = new Semaphore(Constants.SEMAPHORE_SIZE);
 
     public static void init() {
-        for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
-            BUCKET_TRACE_LIST.add(new TraceCacheBucket(Constants.CLIENT_BUCKET_MAP_SIZE));
-            // ERR_TRACE_SET_LIST.add(new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT));
+        for (int i = 0; i < Constants.CLIENT_BIG_BUCKET_COUNT; i++) {
+            BigBucket bigBucket = new BigBucket();
+            bigBucket.init();
+            BUCKET_TRACE_LIST.add(bigBucket);
         }
         HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 30,
                 TimeUnit.SECONDS,
@@ -87,14 +88,15 @@ public class ClientDataStreamHandler implements Runnable {
 
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(Constants.INPUT_BUFFER_SIZE);
 
-            traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
+            bigBucket = BUCKET_TRACE_LIST.get(bigBucketPos);
             // errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
             errTraceIdSet = Sets.newHashSet();
-            traceMap = traceCacheBucket.getData();
+            smallBucket = bigBucket.getSmallBucket(innerPos);
+
             byte[] bytes;
             int times = 0;
-            // marked as a working bucket
-            traceCacheBucket.tryEnter();
+            // marked as a working small bucket
+            smallBucket.tryEnter(1, 5, pos, innerPos);
             // use block read
             while (channel.read(byteBuffer) != -1) {
                 ((Buffer) byteBuffer).flip();
@@ -103,7 +105,7 @@ public class ClientDataStreamHandler implements Runnable {
                 byteBuffer.get(bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
                 while (!semaphore.tryAcquire(1, TimeUnit.MILLISECONDS)) {
-                    Thread.sleep(25);
+                    Thread.sleep(20);
                 }
                 times += 1;
                 // 让出时间片，让处理线程去处理字节
@@ -115,7 +117,7 @@ public class ClientDataStreamHandler implements Runnable {
             }
             // last update, clear the badTraceIdSet
             HANDLER_THREAD_POOL.execute(() -> updateWrongTraceId(errTraceIdSet, pos));
-            HANDLER_THREAD_POOL.execute(() -> traceCacheBucket.quit());
+            HANDLER_THREAD_POOL.execute(() -> smallBucket.quit());
             HANDLER_THREAD_POOL.execute(this::callFinish);
             input.close();
         } catch (Exception e) {
@@ -151,7 +153,7 @@ public class ClientDataStreamHandler implements Runnable {
      * @return
      */
     public static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
-        int bucketCount = Constants.CLIENT_BUCKET_COUNT;
+        int bucketCount = Constants.CLIENT_BIG_BUCKET_COUNT;
         // calculate the three continue pos
         int curr = pos % bucketCount;
         int prev = (curr - 1 == -1) ? bucketCount - 1 : (curr - 1) % bucketCount;
@@ -160,7 +162,8 @@ public class ClientDataStreamHandler implements Runnable {
         logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
                 "bucket中的数据", pos, curr, prev, next));
 
-        Map<String, Set<String>> wrongTraceMap = new HashMap<>(32);
+        // TODO 隐患 LIST SET
+        Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
 
         // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap, true);
@@ -178,37 +181,25 @@ public class ClientDataStreamHandler implements Runnable {
      */
     private static void getWrongTraceWithBucketPos(int bucketPos, int pos, Set<String> traceIdSet
             , Map<String,
-            Set<String>> wrongTraceMap, boolean shouldClear) {
+            List<String>> wrongTraceMap, boolean shouldClear) {
         // backend start pull these bucket
-        TraceCacheBucket traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-        // when this bucket is still working, cas until it become idle status, and then set as
-        //working status
-        while (!traceCacheBucket.tryEnter()) {
-            try {
-                Thread.sleep(15);
-                logger.info("等待进入bucket {}", pos);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+        BigBucket bigBucket = BUCKET_TRACE_LIST.get(bucketPos);
+        List<SmallBucket> smallBucketList = bigBucket.getSmallBucketList();
+        for (SmallBucket smallBucket : smallBucketList) {
+            if (smallBucket.tryEnter(50, 10, pos, innerPos)) {
+                // 这里看起来像是O(n^2)的操作，但是实际上traceIdSet的大小基本都非常小
+                traceIdSet.forEach(traceId -> {
+                    List<String> spans = smallBucket.getSpans(traceId);
+                    if (spans != null) {
+                        // 这里放入的时候其实也要注意
+                        List<String> existSpanList = wrongTraceMap.computeIfAbsent(traceId, k -> new ArrayList<>());
+                        existSpanList.addAll(spans);
+                    }
+                });
             }
+            if (shouldClear) smallBucket.clear();
+            smallBucket.quit();
         }
-        Map<String, Set<String>> traceMap = traceCacheBucket.getData();
-        for (String traceId : traceIdSet) {
-            Set<String> spanList = traceMap.get(traceId);
-            if (spanList != null) {
-                // one trace may cross two bucket (e.g bucket size 20000, span1 in line 19999,
-                // span2
-                //in line 20001)
-                Set<String> existSpanList = wrongTraceMap.get(traceId);
-                if (existSpanList != null) {
-                    existSpanList.addAll(spanList);
-                } else {
-                    wrongTraceMap.put(traceId, spanList);
-                }
-            }
-        }
-        // the previous bucket must have been consumed, so free this bucket
-        if (shouldClear) traceCacheBucket.clear();
-        traceCacheBucket.quit();
     }
 
     private void callFinish() {
@@ -282,40 +273,38 @@ public class ClientDataStreamHandler implements Runnable {
                     tagsBuilder.delete(0, tagsBuilder.length());
                     lineBuilder.delete(0, lineBuilder.length());
 
-                    // some switch operations is also should be done
-                    if (lineCount % Constants.BUCKET_SIZE == 0) {
-                        // set current bucket as idle status
-                        traceCacheBucket.quit();
-                        // switch to next
-                        traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-                        // errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
-                        // CAS until enter working status
-                        int retryTimes = 0;
-                        while (!traceCacheBucket.tryEnter() && !traceMap.isEmpty()) {
-                            try {
-                                logger.info("无法进行下一工作 pos {}", pos);
-                                Thread.sleep(25);
-                            } catch (InterruptedException e) {
-                                e.printStackTrace();
-                            }
-                            retryTimes += 1;
-                            // 要是重试超过100次(5s)，直接强制解除工作状态，清空并上报
-                            if (retryTimes >= 200) {
-                                logger.warn("pos {}: bucket 占用时间异常，清空数据并上报 {} 处空数据", pos,
-                                        pos - Constants.CLIENT_BUCKET_COUNT);
-                                updateWrongTraceId(new HashSet<>(),
-                                        pos - Constants.CLIENT_BUCKET_COUNT);
-                                traceCacheBucket.clear();
-                                traceCacheBucket.quit();
-                            }
+                    // 先切大桶，再切小桶
+                    if (lineCount % Constants.UPDATE_INTERVAL == 0) {
+                        // 更新错误链路id到backend
+                        updateWrongTraceId(errTraceIdSet, pos);
+
+                        pos = (int) lineCount / Constants.UPDATE_INTERVAL;
+                        bigBucketPos = pos % Constants.CLIENT_BIG_BUCKET_COUNT;
+                        // switch to next big bucket
+                        bigBucket = BUCKET_TRACE_LIST.get(bigBucketPos);
+                    }
+
+                    // 在这里切换小桶，旧桶退出工作状态，新桶进入工作状态
+                    if (lineCount % Constants.SWITCH_SMALL_BUCKET_INTERVAL == 0) {
+                        smallBucket.quit();
+                        if (innerPos == Constants.CLIENT_SMALL_BUCKET_COUNT - 1) {
+                            innerPos = 0;
+                        } else {
+                            innerPos += 1;
                         }
-                        traceMap = traceCacheBucket.getData();
+                        smallBucket = bigBucket.getSmallBucket(innerPos);
+                        if (!smallBucket.tryEnter(100, 10, pos, innerPos)) {
+                            smallBucket.clear();
+                            smallBucket.forceEnter();
+                            logger.warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
+                        }
                     }
                 }
             }
             if (len - 1 >= blockPos + 1) {
                 lineBuilder.append(chars, blockPos + 1, len - blockPos - 1);
             }
+            // 任务结束，释放计数
             semaphore.release();
         }
 
@@ -341,20 +330,11 @@ public class ClientDataStreamHandler implements Runnable {
             String tags = tagsBuilder.toString();
 
             // TODO 这里可不可以用list
-            Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
+            List<String> spanList = smallBucket.computeIfAbsent(traceId);
             spanList.add(line);
 
             if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
                 errTraceIdSet.add(traceId);
-            }
-
-            if (lineCount % Constants.BUCKET_SIZE == 0) {
-                // 更新这两个offset
-                pos = (int) lineCount / Constants.BUCKET_SIZE;
-                bucketPos = pos % Constants.CLIENT_BUCKET_COUNT;
-
-                // 更新wrongTraceId到backend
-                updateWrongTraceId(errTraceIdSet, pos - 1);
             }
         }
     }

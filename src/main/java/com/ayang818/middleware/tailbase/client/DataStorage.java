@@ -12,7 +12,7 @@ import java.util.concurrent.*;
  * @date 2020/5/22 22:00
  **/
 public class DataStorage {
-    public static List<TraceCacheBucket> BUCKET_TRACE_LIST = new ArrayList<>(Constants.CLIENT_BUCKET_COUNT);
+    public static List<BigBucket> BUCKET_TRACE_LIST = new ArrayList<>(Constants.CLIENT_BIG_BUCKET_COUNT);
 
     public static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60,
             TimeUnit.SECONDS,

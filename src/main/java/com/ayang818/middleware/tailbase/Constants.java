@@ -10,20 +10,28 @@ public class Constants {
     public static final String CLIENT_PROCESS_PORT2 = "8001";
     public static final String BACKEND_PROCESS_PORT1 = "8002";
     public static final int BACKEND_WEBSOCKET_PORT = 8003;
-    // bucket间隔2w行
-    public static final int BUCKET_SIZE = 20000;
-    // client下bucket的数量
-    public static final int CLIENT_BUCKET_COUNT = 30;
+
+    // 每间隔2w行上报backend
+    public static final int UPDATE_INTERVAL = 20000;
+    // client下bigBucket的数量
+    public static final int CLIENT_BIG_BUCKET_COUNT = 30;
+    // client下一个bigBucket中smallBucket的数量
+    public static final int CLIENT_SMALL_BUCKET_COUNT = 100;
+    // 每读这么多行，切换小桶
+    public static final int SWITCH_SMALL_BUCKET_INTERVAL = UPDATE_INTERVAL / CLIENT_SMALL_BUCKET_COUNT;
+    // 保守估计每个traceId下只有2条数据
+    public static final int CLIENT_SMALL_BUCKET_MAP_SIZE = UPDATE_INTERVAL / CLIENT_SMALL_BUCKET_COUNT / 2;
     // backend下bucket的数量
     public static final int BACKEND_BUCKET_COUNT = 100;
-    // 保守估计每个traceId下只有2条数据
-    public static final int CLIENT_BUCKET_MAP_SIZE = 10000;
+    // 错误链路id记录set
     public static final int BUCKET_ERR_TRACE_COUNT = 20;
-    // 到达次数，取决于client数量
+    // 访问次数，取决于client数量
     public static final int TARGET_PROCESS_COUNT = 2;
     // 512KB 256KB 128KB 64KB 32KB 16KB 8KB 4KB 慢慢调 / 目前测出来16KB是最快的
     public static final int INPUT_BUFFER_SIZE = 1024 * 16;
+    // 允许处理队列中最多多少任务
     public static final int SEMAPHORE_SIZE = 50000;
+
     public static final int UPDATE_TYPE = 0;
     public static final int TRACE_DETAIL = 1;
     public static final int FIN_TYPE = 2;
