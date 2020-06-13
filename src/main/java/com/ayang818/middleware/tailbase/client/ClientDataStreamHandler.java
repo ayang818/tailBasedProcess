@@ -48,6 +48,7 @@ public class ClientDataStreamHandler implements Runnable {
     private static volatile Map<String, Set<String>> traceMap;
     private static final StringBuilder lineBuilder = new StringBuilder();
     private static volatile boolean firstSetPriority = true;
+    private static Semaphore semaphore = new Semaphore(Constants.SEMAPHORE_SIZE);
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
@@ -101,6 +102,9 @@ public class ClientDataStreamHandler implements Runnable {
                 bytes = new byte[remain];
                 byteBuffer.get(bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
+                while (!semaphore.tryAcquire(1, TimeUnit.MILLISECONDS)) {
+                    Thread.sleep(25);
+                }
                 times += 1;
                 // 让出时间片，让处理线程去处理字节
                 if (times % 1600 == 0) {
@@ -257,6 +261,8 @@ public class ClientDataStreamHandler implements Runnable {
                 firstSetPriority = false;
             }
             chars = new String(bytes).toCharArray();
+            // 释放引用
+            bytes = null;
             int len = chars.length;
             int preBlockPos = 0;
             int blockPos = -1;
@@ -310,6 +316,7 @@ public class ClientDataStreamHandler implements Runnable {
             if (len - 1 >= blockPos + 1) {
                 lineBuilder.append(chars, blockPos + 1, len - blockPos - 1);
             }
+            semaphore.release();
         }
 
         public void handleLine(String line, StringBuilder traceIdBuilder, StringBuilder tagsBuilder) {
