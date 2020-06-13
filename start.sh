@@ -6,3 +6,4 @@ else
    java -Dserver.port=$SERVER_PORT -Xmx2048m -Xms2048m -jar /usr/local/src/app.jar &
 fi
 tail -f /usr/local/src/start.sh
+line

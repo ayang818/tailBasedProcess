@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.BasicHttpHandler;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
+import com.google.common.collect.Sets;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
@@ -21,9 +22,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
@@ -48,17 +47,18 @@ public class ClientDataStreamHandler implements Runnable {
     private static volatile Set<String> errTraceIdSet;
     private static volatile Map<String, Set<String>> traceMap;
     private static final StringBuilder lineBuilder = new StringBuilder();
+    private static volatile boolean firstSetPriority = true;
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BUCKET_COUNT; i++) {
             BUCKET_TRACE_LIST.add(new TraceCacheBucket(Constants.CLIENT_BUCKET_MAP_SIZE));
-            ERR_TRACE_SET_LIST.add(new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT));
+            // ERR_TRACE_SET_LIST.add(new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT));
         }
-        HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 60,
+        HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 30,
                 TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(10000),
+                new LinkedBlockingQueue<>(30000),
                 new DefaultThreadFactory("line-handler"),
-                new ThreadPoolExecutor.CallerRunsPolicy());
+                new ThreadPoolExecutor.AbortPolicy());
     }
 
     public static void start() {
@@ -87,10 +87,11 @@ public class ClientDataStreamHandler implements Runnable {
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(Constants.INPUT_BUFFER_SIZE);
 
             traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-            errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+            // errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+            errTraceIdSet = Sets.newHashSet();
             traceMap = traceCacheBucket.getData();
             byte[] bytes;
-
+            int times = 0;
             // marked as a working bucket
             traceCacheBucket.tryEnter();
             // use block read
@@ -100,7 +101,12 @@ public class ClientDataStreamHandler implements Runnable {
                 bytes = new byte[remain];
                 byteBuffer.get(bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
-
+                times += 1;
+                // 让出时间片，让处理线程去处理字节
+                if (times % 1600 == 0) {
+                    logger.info("queue size {}", ((ThreadPoolExecutor) HANDLER_THREAD_POOL).getQueue().size());
+                    // Thread.sleep(10);
+                }
                 HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
             }
             // last update, clear the badTraceIdSet
@@ -245,18 +251,29 @@ public class ClientDataStreamHandler implements Runnable {
 
         @Override
         public void run() {
+            // TODO 设置线程优先级?
+            if (firstSetPriority) {
+                Thread.currentThread().setPriority(10);
+                firstSetPriority = false;
+            }
             chars = new String(bytes).toCharArray();
-
+            int len = chars.length;
             int preBlockPos = 0;
             int blockPos = -1;
-            for (int i = 0; i < readableSize; i++) {
+            StringBuilder traceIdBuilder = new StringBuilder();
+            StringBuilder tagsBuilder = new StringBuilder();
+
+            for (int i = 0; i < len; i++) {
                 if (chars[i] == '\n') {
                     preBlockPos = blockPos + 1;
                     blockPos = i;
+
                     lineBuilder.append(chars, preBlockPos, blockPos - preBlockPos);
                     lineCount += 1;
                     String line = lineBuilder.toString();
-                    handleLine(line);
+                    handleLine(line, traceIdBuilder, tagsBuilder);
+                    traceIdBuilder.delete(0, traceIdBuilder.length());
+                    tagsBuilder.delete(0, tagsBuilder.length());
                     lineBuilder.delete(0, lineBuilder.length());
 
                     // some switch operations is also should be done
@@ -265,7 +282,7 @@ public class ClientDataStreamHandler implements Runnable {
                         traceCacheBucket.quit();
                         // switch to next
                         traceCacheBucket = BUCKET_TRACE_LIST.get(bucketPos);
-                        errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
+                        // errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
                         // CAS until enter working status
                         int retryTimes = 0;
                         while (!traceCacheBucket.tryEnter() && !traceMap.isEmpty()) {
@@ -290,14 +307,12 @@ public class ClientDataStreamHandler implements Runnable {
                     }
                 }
             }
-            if (readableSize - 1 >= blockPos + 1) {
-                lineBuilder.append(chars, blockPos + 1, readableSize - blockPos - 1);
+            if (len - 1 >= blockPos + 1) {
+                lineBuilder.append(chars, blockPos + 1, len - blockPos - 1);
             }
         }
 
-        public void handleLine(String line) {
-            StringBuilder traceIdBuilder = new StringBuilder();
-            StringBuilder tagsBuilder = new StringBuilder();
+        public void handleLine(String line, StringBuilder traceIdBuilder, StringBuilder tagsBuilder) {
             char[] lineChars = line.toCharArray();
             int ICount = 0;
             int tagsStartPos = 0;
@@ -318,6 +333,7 @@ public class ClientDataStreamHandler implements Runnable {
             String traceId = traceIdBuilder.toString();
             String tags = tagsBuilder.toString();
 
+            // TODO 这里可不可以用list
             Set<String> spanList = traceMap.computeIfAbsent(traceId, k -> new HashSet<>());
             spanList.add(line);
 
