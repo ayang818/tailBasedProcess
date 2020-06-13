@@ -41,41 +41,44 @@ public class PullDataService implements Runnable {
 
     @Override
     public void run() {
-        while (BasicHttpHandler.getDataSourcePort() == null) {}
-        while (true) {
-            TraceIdBucket bucket = null;
-            try {
+        try {
+            while (BasicHttpHandler.getDataSourcePort() == null) {}
+            while (true) {
+                TraceIdBucket bucket = null;
+
                 // 0.5 秒没有得到新的可以消费的数据，检查是否结束
-                bucket = blockingQueue.poll(500, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            if (bucket == null) {
-                // 考虑是否已经全部消费完了
-                if (MessageHandler.isFin()) {
-                    if (sendCheckSum()) {
+                bucket = blockingQueue.poll(5, TimeUnit.MILLISECONDS);
+
+                if (bucket == null) {
+                    // 考虑是否已经全部消费完了
+                    if (MessageHandler.isFin()) {
+                        if (sendCheckSum()) {
+                            break;
+                        }
+                    }
+                    timer += 1;
+                    Thread.sleep(15);
+                    if (timer >= 200) {
+                        // 如果重试次数超过4s，说明程序可能有问题，结束评测，免得等很长时间
+                        logger.info("重试时间超过4s，直接发送checkSum");
+                        sendCheckSum();
                         break;
                     }
+                    continue;
                 }
-                timer += 1;
-                if (timer >= 40) {
-                    // 如果重试次数超过20s，说明程序可能有问题，结束评测，免得等很长时间
-                    logger.info("重试时间超过20s，直接发送checkSum");
-                    sendCheckSum();
-                    break;
-                }
-                continue;
-            }
-            // 获取到了bucket，timer置为0
-            timer = 0;
-            // 发送取到的errTraceId 和 对应的 pos
-            Set<String> badTraceIdSet = bucket.getTraceIdSet();
-            int pos = bucket.getPos();
+                // 获取到了bucket，timer置为0
+                timer = 0;
+                // 发送取到的errTraceId 和 对应的 pos
+                Set<String> badTraceIdSet = bucket.getTraceIdSet();
+                int pos = bucket.getPos();
 
-            if (!badTraceIdSet.isEmpty()) {
-                // pull data from each client, then MessageHandler will consume these data
-                MessageHandler.pullWrongTraceDetails(JSON.toJSONString(badTraceIdSet), pos);
+                if (!badTraceIdSet.isEmpty()) {
+                    // pull data from each client, then MessageHandler will consume these data
+                    MessageHandler.pullWrongTraceDetails(JSON.toJSONString(badTraceIdSet), pos);
+                }
             }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
     }
 

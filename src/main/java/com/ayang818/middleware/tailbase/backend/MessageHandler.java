@@ -184,6 +184,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         // bucket中元素是否消费完
         for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
             if (traceIdBucket.getPos() != -1) {
+                logger.info("{} pos处仍在等待",traceIdBucket.getPos());
                 return false;
             }
         }
