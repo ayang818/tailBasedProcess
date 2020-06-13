@@ -22,7 +22,7 @@ public class Constants {
     // 到达次数，取决于client数量
     public static final int TARGET_PROCESS_COUNT = 2;
     // 512KB 256KB 128KB 64KB 32KB 16KB 8KB 4KB 慢慢调 / 目前测出来16KB是最快的
-    public static final int INPUT_BUFFER_SIZE = 1024 * 64;
+    public static final int INPUT_BUFFER_SIZE = 1024 * 16;
     public static final int UPDATE_TYPE = 0;
     public static final int TRACE_DETAIL = 1;
     public static final int FIN_TYPE = 2;
