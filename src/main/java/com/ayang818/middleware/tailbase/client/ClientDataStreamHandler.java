@@ -310,22 +310,22 @@ public class ClientDataStreamHandler implements Runnable {
 
         public void handleLine(String line, StringBuilder traceIdBuilder, StringBuilder tagsBuilder) {
             char[] lineChars = line.toCharArray();
-            int ICount = 0;
-            int tagsStartPos = 0;
-            for (int i = 0; i < lineChars.length; i++) {
+            int len = lineChars.length;
+            // 由于只需要第一部分和最后一部分，所以这样从头找和从结尾找会快很多
+            for (int i = 0; i < len; i++) {
                 if (lineChars[i] == '|') {
-                    ICount += 1;
-                    if (ICount == 1) {
-                        traceIdBuilder.append(lineChars, 0, i);
-                    }
-                    if (ICount == 8) {
-                        tagsStartPos = i + 1;
-                        tagsBuilder.append(lineChars, tagsStartPos,
-                                lineChars.length - tagsStartPos);
-                        break;
-                    }
+                    traceIdBuilder.append(lineChars, 0, i);
+                    break;
                 }
             }
+
+            for (int i = len - 1; i >= 0; i--) {
+                if (lineChars[i] == '|') {
+                    tagsBuilder.append(lineChars, i + 1, len - (i + 1));
+                    break;
+                }
+            }
+
             String traceId = traceIdBuilder.toString();
             String tags = tagsBuilder.toString();
 

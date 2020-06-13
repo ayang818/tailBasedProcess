@@ -195,7 +195,8 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         char[] chars = span.toCharArray();
         int ICount = 0;
         int startTimeStartPos = 0;
-        for (int i = 0; i < chars.length; i++) {
+        int len = chars.length;
+        for (int i = 0; i < len; i++) {
             if (chars[i] == '|') {
                 ICount += 1;
                 if (ICount == 1) {
