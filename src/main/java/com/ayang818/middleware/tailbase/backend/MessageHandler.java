@@ -17,6 +17,11 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -226,7 +231,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
     public String md5(String key) {
         try {
-            byte[] btInput = key.getBytes();
+            byte[] btInput = key.getBytes(StandardCharsets.UTF_8);
             // 获得MD5摘要算法的 MessageDigest 对象
             MessageDigest mdInst = MessageDigest.getInstance("MD5");
             // 使用指定的字节更新摘要

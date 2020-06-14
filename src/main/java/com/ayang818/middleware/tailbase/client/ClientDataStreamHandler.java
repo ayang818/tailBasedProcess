@@ -18,6 +18,7 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -36,7 +37,7 @@ public class ClientDataStreamHandler implements Runnable {
     private static volatile long lineCount = 0;
     // 大桶的 pos 不取余，每 Constants.UPDATE_INTERVAL 行，切换大桶
     private static volatile int pos = 0;
-    // 小桶的 pos ，不需要取余, MAX < Constants.CLIENT_SMALL_BUCKET_SIZE, 、
+    // 小桶的 pos ，不需要取余, MAX < Constants.CLIENT_SMALL_BUCKET_SIZE,
     // 每读 Constants.SWITCH_SMALL_BUCKET_INTERVAL 行，切换小桶
     private static volatile int innerPos = 0;
     // pos % BIG_BUCKET_COUNT
@@ -47,8 +48,7 @@ public class ClientDataStreamHandler implements Runnable {
     private static volatile Set<String> errTraceIdSet;
 
     private static final StringBuilder lineBuilder = new StringBuilder();
-    private static volatile boolean firstSetPriority = true;
-    private static Semaphore semaphore = new Semaphore(Constants.SEMAPHORE_SIZE);
+    private static final Semaphore semaphore = new Semaphore(Constants.SEMAPHORE_SIZE);
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BIG_BUCKET_COUNT; i++) {
@@ -94,9 +94,9 @@ public class ClientDataStreamHandler implements Runnable {
             smallBucket = bigBucket.getSmallBucket(innerPos);
 
             byte[] bytes;
-            int times = 0;
             // marked as a working small bucket
             smallBucket.tryEnter(1, 5, pos, innerPos);
+            int times= 0;
             // use block read
             while (channel.read(byteBuffer) != -1) {
                 ((Buffer) byteBuffer).flip();
@@ -104,14 +104,14 @@ public class ClientDataStreamHandler implements Runnable {
                 bytes = new byte[remain];
                 byteBuffer.get(bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
-                while (!semaphore.tryAcquire(1, TimeUnit.MILLISECONDS)) {
-                    Thread.sleep(20);
-                }
                 times += 1;
                 // 让出时间片，让处理线程去处理字节
                 if (times % 1600 == 0) {
                     logger.info("queue size {}", ((ThreadPoolExecutor) HANDLER_THREAD_POOL).getQueue().size());
                     // Thread.sleep(10);
+                }
+                while (!semaphore.tryAcquire(1, TimeUnit.MILLISECONDS)) {
+                    Thread.sleep(10);
                 }
                 HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
             }
@@ -162,7 +162,6 @@ public class ClientDataStreamHandler implements Runnable {
         logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
                 "bucket中的数据", pos, curr, prev, next));
 
-        // TODO 隐患 LIST SET
         Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
 
         // these traceId data should be collect
@@ -189,11 +188,13 @@ public class ClientDataStreamHandler implements Runnable {
             if (smallBucket.tryEnter(50, 10, pos, innerPos)) {
                 // 这里看起来像是O(n^2)的操作，但是实际上traceIdSet的大小基本都非常小
                 traceIdSet.forEach(traceId -> {
-                    List<String> spans = smallBucket.getSpans(traceId);
+                    List<byte[]> spans = smallBucket.getSpans(traceId);
                     if (spans != null) {
                         // 这里放入的时候其实也要注意
                         List<String> existSpanList = wrongTraceMap.computeIfAbsent(traceId, k -> new ArrayList<>());
-                        existSpanList.addAll(spans);
+                        for (byte[] tmpBytes : spans) {
+                            existSpanList.add(new String(tmpBytes));
+                        }
                     }
                 });
             }
@@ -233,47 +234,66 @@ public class ClientDataStreamHandler implements Runnable {
      * 处理读取出来的一块数据，作为一个worker提交到一个单线程池的任务队列中
      */
     private class BlockWorker implements Runnable {
-        char[] chars;
         int readableSize;
         byte[] bytes;
 
         public BlockWorker(byte[] bytes, int readableSize) {
             this.bytes = bytes;
-            // TODO 创建该对象时这个耗时在处理线程中还是IO线程中？
-            // this.chars = new String(bytes).toCharArray();
             this.readableSize = readableSize;
         }
 
         @Override
         public void run() {
-            // TODO 设置线程优先级?
-            if (firstSetPriority) {
-                Thread.currentThread().setPriority(10);
-                firstSetPriority = false;
-            }
-            chars = new String(bytes).toCharArray();
-            // 释放引用
-            bytes = null;
-            int len = chars.length;
-            int preBlockPos = 0;
-            int blockPos = -1;
+            int len = bytes.length;
+            // 一行的开始位置
+            int lineStartPos = 0;
+            // 一行的结束位置
+            int lineEndPos = -1;
+            // traceId 结束位置
+            int traceIdEndPos = 0;
+            // tags 起始位置
+            int tagsStartPos = 0;
+            // | 计数，每换行重置0
+            int Icount = 0;
+            boolean isFirstLine = true;
             StringBuilder traceIdBuilder = new StringBuilder();
             StringBuilder tagsBuilder = new StringBuilder();
-
+            byte spl = 124; // |
+            byte lf = 10;   // \n
             for (int i = 0; i < len; i++) {
-                if (chars[i] == '\n') {
-                    preBlockPos = blockPos + 1;
-                    blockPos = i;
-
-                    lineBuilder.append(chars, preBlockPos, blockPos - preBlockPos);
+                // 124 == |，分隔符
+                if (bytes[i] == spl) {
+                    Icount += 1;
+                    if (Icount == 1) {
+                        traceIdEndPos = i;
+                    }
+                    if (Icount == 8) {
+                        tagsStartPos = i + 1;
+                    }
+                }
+                // 10 == \n，换行
+                if (bytes[i] == lf) {
+                    lineStartPos = lineEndPos + 1;
+                    lineEndPos = i;
                     lineCount += 1;
-                    String line = lineBuilder.toString();
-                    handleLine(line, traceIdBuilder, tagsBuilder);
-                    traceIdBuilder.delete(0, traceIdBuilder.length());
-                    tagsBuilder.delete(0, tagsBuilder.length());
-                    lineBuilder.delete(0, lineBuilder.length());
+                    Icount = 0;
 
-                    // 先切大桶，再切小桶
+                    // 结合前一块最后部分，形成完整的一行，按照字符处理
+                    if (isFirstLine) {
+                        String linePart = new String(bytes, lineStartPos, lineEndPos - lineStartPos);
+                        lineBuilder.append(linePart);
+                        handleLine(lineBuilder.toString(), traceIdBuilder, tagsBuilder);
+                        isFirstLine = false;
+                    } else {
+                        // 用于处理连续行
+                        String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
+                        String tags = new String(bytes, tagsStartPos, lineEndPos - tagsStartPos);
+                        handleLine(traceId, tags, lineStartPos, lineEndPos);
+                        traceIdEndPos = 0;
+                        tagsStartPos = 0;
+                    }
+
+                    // 先切换大桶，再切小桶
                     if (lineCount % Constants.UPDATE_INTERVAL == 0) {
                         // 更新错误链路id到backend
                         updateWrongTraceId(errTraceIdSet, pos);
@@ -301,18 +321,37 @@ public class ClientDataStreamHandler implements Runnable {
                     }
                 }
             }
-            if (len - 1 >= blockPos + 1) {
-                lineBuilder.append(chars, blockPos + 1, len - blockPos - 1);
+            // 将最后一部分不完整行导入lineBuilder
+            if (len - 1 >= lineEndPos + 1) {
+                lineBuilder.append(new String(bytes, lineEndPos + 1, len - lineEndPos - 1));
             }
             // 任务结束，释放计数
             semaphore.release();
         }
 
+        public void handleLine(String traceId, String tags, int preBlockPos, int blockPos) {
+            List<byte[]> spanList = smallBucket.computeIfAbsent(traceId);
+            byte[] tmp = new byte[blockPos - preBlockPos];
+            System.arraycopy(bytes, preBlockPos, tmp, 0, blockPos - preBlockPos);
+
+            spanList.add(tmp);
+            if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
+                errTraceIdSet.add(traceId);
+            }
+        }
+
+        /**
+         * <p>处理块与块之间交界处的合并行</p>
+         * @param line
+         * @param traceIdBuilder
+         * @param tagsBuilder
+         */
         public void handleLine(String line, StringBuilder traceIdBuilder, StringBuilder tagsBuilder) {
             char[] lineChars = line.toCharArray();
             int len = lineChars.length;
             // 由于只需要第一部分和最后一部分，所以这样从头找和从结尾找会快很多
             for (int i = 0; i < len; i++) {
+                // 找id
                 if (lineChars[i] == '|') {
                     traceIdBuilder.append(lineChars, 0, i);
                     break;
@@ -320,6 +359,7 @@ public class ClientDataStreamHandler implements Runnable {
             }
 
             for (int i = len - 1; i >= 0; i--) {
+                // 找tags
                 if (lineChars[i] == '|') {
                     tagsBuilder.append(lineChars, i + 1, len - (i + 1));
                     break;
@@ -329,13 +369,16 @@ public class ClientDataStreamHandler implements Runnable {
             String traceId = traceIdBuilder.toString();
             String tags = tagsBuilder.toString();
 
-            // TODO 这里可不可以用list
-            List<String> spanList = smallBucket.computeIfAbsent(traceId);
-            spanList.add(line);
+            List<byte[]> spanList = smallBucket.computeIfAbsent(traceId);
+            spanList.add(line.getBytes(StandardCharsets.UTF_8));
 
             if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
                 errTraceIdSet.add(traceId);
             }
+            // 清空，方便重用
+            traceIdBuilder.delete(0, traceIdBuilder.length());
+            tagsBuilder.delete(0, tagsBuilder.length());
+            lineBuilder.delete(0, lineBuilder.length());
         }
     }
 }

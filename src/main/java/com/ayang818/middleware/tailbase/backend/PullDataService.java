@@ -58,8 +58,8 @@ public class PullDataService implements Runnable {
                     }
                     timer += 1;
                     Thread.sleep(15);
-                    if (timer >= 200) {
-                        // 如果重试次数超过4s，说明程序可能有问题，结束评测，免得等很长时间
+                    if (timer >= 100) {
+                        // 如果重试次数超过2s，说明程序可能有问题，结束评测，免得等很长时间
                         logger.info("重试时间超过4s，直接发送checkSum");
                         sendCheckSum();
                         break;

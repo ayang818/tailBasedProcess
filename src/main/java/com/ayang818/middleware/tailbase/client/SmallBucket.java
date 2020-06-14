@@ -24,9 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  **/
 public class SmallBucket {
     private final AtomicBoolean isWorking;
-    // TODO 这里用List不用Set可能是隐患
     // key is traceId, value is all spans
-    private final Map<String, List<String>> data;
+    private final Map<String, List<byte[]>> data;
     private static final Logger logger = LoggerFactory.getLogger(SmallBucket.class);
 
     public SmallBucket(int size) {
@@ -34,7 +33,7 @@ public class SmallBucket {
         data = new ConcurrentHashMap<>(size);
     }
 
-    public List<String> getSpans(String traceId) {
+    public List<byte[]> getSpans(String traceId) {
         return data.get(traceId);
     }
 
@@ -69,7 +68,7 @@ public class SmallBucket {
         this.isWorking.compareAndSet(true, false);
     }
 
-    public List<String> computeIfAbsent(String traceId) {
+    public List<byte[]> computeIfAbsent(String traceId) {
         return data.computeIfAbsent(traceId, k -> new ArrayList<>());
     }
 
