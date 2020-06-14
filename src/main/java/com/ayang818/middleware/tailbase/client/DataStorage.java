@@ -18,5 +18,7 @@ public class DataStorage {
             TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("client_starter"));
 
+    public static ExecutorService UPDATE_THREAD;
+
     public static ExecutorService HANDLER_THREAD_POOL;
 }

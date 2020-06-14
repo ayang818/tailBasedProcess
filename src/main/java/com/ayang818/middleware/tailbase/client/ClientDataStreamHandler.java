@@ -48,7 +48,6 @@ public class ClientDataStreamHandler implements Runnable {
     private static volatile Set<String> errTraceIdSet;
 
     private static final StringBuilder lineBuilder = new StringBuilder();
-    private static final Semaphore semaphore = new Semaphore(Constants.SEMAPHORE_SIZE);
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BIG_BUCKET_COUNT; i++) {
@@ -61,6 +60,10 @@ public class ClientDataStreamHandler implements Runnable {
                 new LinkedBlockingQueue<>(),
                 new DefaultThreadFactory("line-handler"),
                 new ThreadPoolExecutor.AbortPolicy());
+
+        UPDATE_THREAD = new ThreadPoolExecutor(1, 1, 60,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(10000), new DefaultThreadFactory("update_thread"));
     }
 
     public static void start() {
@@ -89,14 +92,12 @@ public class ClientDataStreamHandler implements Runnable {
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(Constants.INPUT_BUFFER_SIZE);
 
             bigBucket = BUCKET_TRACE_LIST.get(bigBucketPos);
-            // errTraceIdSet = ERR_TRACE_SET_LIST.get(bucketPos);
             errTraceIdSet = Sets.newHashSet();
             smallBucket = bigBucket.getSmallBucket(innerPos);
 
             byte[] bytes;
             // marked as a working small bucket
             smallBucket.tryEnter(1, 5, pos, innerPos);
-            int times= 0;
             // use block read
             while (channel.read(byteBuffer) != -1) {
                 ((Buffer) byteBuffer).flip();
@@ -104,16 +105,9 @@ public class ClientDataStreamHandler implements Runnable {
                 bytes = new byte[remain];
                 byteBuffer.get(bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
-                times += 1;
-                // 让出时间片，让处理线程去处理字节
-                if (times % 1600 == 0) {
-                    logger.info("queue size {}", ((ThreadPoolExecutor) HANDLER_THREAD_POOL).getQueue().size());
-                    // Thread.sleep(10);
-                }
-                while (!semaphore.tryAcquire(1, TimeUnit.MILLISECONDS)) {
-                    Thread.sleep(10);
-                }
-                HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
+
+                // HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
+                BlockWorker.run(bytes, remain);
             }
             // last update, clear the badTraceIdSet
             HANDLER_THREAD_POOL.execute(() -> updateWrongTraceId(errTraceIdSet, pos));
@@ -132,13 +126,14 @@ public class ClientDataStreamHandler implements Runnable {
      * @param badTraceIdSet
      * @param pos
      */
-    private void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
+    private static void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
         String json = JSON.toJSONString(badTraceIdSet);
         if (badTraceIdSet.size() > 0) {
             // send badTraceIdList and its pos to the backend
             String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
                     , Constants.UPDATE_TYPE, json, pos);
-            websocket.sendTextFrame(msg);
+            UPDATE_THREAD.execute(() -> websocket.sendTextFrame(msg));
+            // websocket.sendTextFrame(msg);
             logger.info("成功上报pos {} 的wrongTraceId...", pos);
         }
         // auto clear after update
@@ -185,7 +180,7 @@ public class ClientDataStreamHandler implements Runnable {
         BigBucket bigBucket = BUCKET_TRACE_LIST.get(bucketPos);
         List<SmallBucket> smallBucketList = bigBucket.getSmallBucketList();
         for (SmallBucket smallBucket : smallBucketList) {
-            if (smallBucket.tryEnter(50, 10, pos, innerPos)) {
+            if (smallBucket.tryEnter(50, 5, pos, innerPos)) {
                 // 这里看起来像是O(n^2)的操作，但是实际上traceIdSet的大小基本都非常小
                 traceIdSet.forEach(traceId -> {
                     List<byte[]> spans = smallBucket.getSpans(traceId);
@@ -233,7 +228,7 @@ public class ClientDataStreamHandler implements Runnable {
     /**
      * 处理读取出来的一块数据，作为一个worker提交到一个单线程池的任务队列中
      */
-    private class BlockWorker implements Runnable {
+    private static class BlockWorker {
         int readableSize;
         byte[] bytes;
 
@@ -242,8 +237,7 @@ public class ClientDataStreamHandler implements Runnable {
             this.readableSize = readableSize;
         }
 
-        @Override
-        public void run() {
+        public static void run(byte[] bytes, int readableSize) {
             int len = bytes.length;
             // 一行的开始位置
             int lineStartPos = 0;
@@ -288,7 +282,7 @@ public class ClientDataStreamHandler implements Runnable {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
                         String tags = new String(bytes, tagsStartPos, lineEndPos - tagsStartPos);
-                        handleLine(traceId, tags, lineStartPos, lineEndPos);
+                        handleLine(bytes, traceId, tags, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
                     }
@@ -297,7 +291,6 @@ public class ClientDataStreamHandler implements Runnable {
                     if (lineCount % Constants.UPDATE_INTERVAL == 0) {
                         // 更新错误链路id到backend
                         updateWrongTraceId(errTraceIdSet, pos);
-
                         pos = (int) lineCount / Constants.UPDATE_INTERVAL;
                         bigBucketPos = pos % Constants.CLIENT_BIG_BUCKET_COUNT;
                         // switch to next big bucket
@@ -325,11 +318,9 @@ public class ClientDataStreamHandler implements Runnable {
             if (len - 1 >= lineEndPos + 1) {
                 lineBuilder.append(new String(bytes, lineEndPos + 1, len - lineEndPos - 1));
             }
-            // 任务结束，释放计数
-            semaphore.release();
         }
 
-        public void handleLine(String traceId, String tags, int preBlockPos, int blockPos) {
+        private static void handleLine(byte[] bytes, String traceId, String tags, int preBlockPos, int blockPos) {
             List<byte[]> spanList = smallBucket.computeIfAbsent(traceId);
             byte[] tmp = new byte[blockPos - preBlockPos];
             System.arraycopy(bytes, preBlockPos, tmp, 0, blockPos - preBlockPos);
@@ -342,11 +333,12 @@ public class ClientDataStreamHandler implements Runnable {
 
         /**
          * <p>处理块与块之间交界处的合并行</p>
+         *
          * @param line
          * @param traceIdBuilder
          * @param tagsBuilder
          */
-        public void handleLine(String line, StringBuilder traceIdBuilder, StringBuilder tagsBuilder) {
+        public static void handleLine(String line, StringBuilder traceIdBuilder, StringBuilder tagsBuilder) {
             char[] lineChars = line.toCharArray();
             int len = lineChars.length;
             // 由于只需要第一部分和最后一部分，所以这样从头找和从结尾找会快很多

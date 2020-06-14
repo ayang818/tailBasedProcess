@@ -30,7 +30,7 @@ public class Constants {
     // 512KB 256KB 128KB 64KB 32KB 16KB 8KB 4KB 慢慢调 / 目前测出来16KB是最快的
     public static final int INPUT_BUFFER_SIZE = 1024 * 16;
     // 允许处理队列中最多多少任务
-    public static final int SEMAPHORE_SIZE = 30000;
+    public static final int SEMAPHORE_SIZE = 20000;
 
     public static final int UPDATE_TYPE = 0;
     public static final int TRACE_DETAIL = 1;
