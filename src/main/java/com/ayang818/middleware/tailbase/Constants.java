@@ -27,8 +27,8 @@ public class Constants {
     public static final int BUCKET_ERR_TRACE_COUNT = 20;
     // 访问次数，取决于client数量
     public static final int TARGET_PROCESS_COUNT = 2;
-    // 512KB 256KB 128KB 64KB 32KB 16KB 8KB 4KB 慢慢调 / 目前测出来16KB是最快的
-    public static final int INPUT_BUFFER_SIZE = 1024 * 128;
+    // 512KB 256KB 128KB 64KB 32KB 16KB 8KB 4KB 慢慢调
+    public static final int INPUT_BUFFER_SIZE = 1024 * 256;
     // 允许处理队列中最多多少任务
     public static final int SEMAPHORE_SIZE = 20000;
 
