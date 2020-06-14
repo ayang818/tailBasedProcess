@@ -107,7 +107,7 @@ public class ClientDataStreamHandler implements Runnable {
                 ((Buffer) byteBuffer).clear();
 
                 // HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
-                BlockWorker.run(bytes, remain);
+                BlockWorker.run(bytes);
             }
             // last update, clear the badTraceIdSet
             HANDLER_THREAD_POOL.execute(() -> updateWrongTraceId(errTraceIdSet, pos));
@@ -229,15 +229,13 @@ public class ClientDataStreamHandler implements Runnable {
      * 处理读取出来的一块数据，作为一个worker提交到一个单线程池的任务队列中
      */
     private static class BlockWorker {
-        int readableSize;
         byte[] bytes;
 
-        public BlockWorker(byte[] bytes, int readableSize) {
+        public BlockWorker(byte[] bytes) {
             this.bytes = bytes;
-            this.readableSize = readableSize;
         }
 
-        public static void run(byte[] bytes, int readableSize) {
+        public static void run(byte[] bytes) {
             int len = bytes.length;
             // 一行的开始位置
             int lineStartPos = 0;
@@ -249,11 +247,16 @@ public class ClientDataStreamHandler implements Runnable {
             int tagsStartPos = 0;
             // | 计数，每换行重置0
             int Icount = 0;
+
             boolean isFirstLine = true;
             StringBuilder traceIdBuilder = new StringBuilder();
             StringBuilder tagsBuilder = new StringBuilder();
             byte spl = 124; // |
             byte lf = 10;   // \n
+            // error=1 [101, 114, 114, 111, 114, 61, 49]
+            // http.status_code=200 [104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61, 50, 48, 48]
+            // 200 [50, 48, 48]
+            // http.status_code= [104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61]
             for (int i = 0; i < len; i++) {
                 // 124 == |，分隔符
                 if (bytes[i] == spl) {
@@ -264,6 +267,10 @@ public class ClientDataStreamHandler implements Runnable {
                     if (Icount == 8) {
                         tagsStartPos = i + 1;
                     }
+                }
+                // 处在可以判断标签的地方
+                if (Icount == 8) {
+
                 }
                 // 10 == \n，换行
                 if (bytes[i] == lf) {
