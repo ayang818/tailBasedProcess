@@ -95,25 +95,25 @@ public class ClientDataStreamHandler implements Runnable {
             errTraceIdSet = Sets.newHashSet();
             smallBucket = bigBucket.getSmallBucket(innerPos);
 
-            byte[] bytes;
+            byte[] bytes = new byte[Constants.INPUT_BUFFER_SIZE];
             // marked as a working small bucket
             smallBucket.tryEnter(1, 5, pos, innerPos);
             // use block read
             while (channel.read(byteBuffer) != -1) {
                 ((Buffer) byteBuffer).flip();
                 int remain = byteBuffer.remaining();
-                bytes = new byte[remain];
                 byteBuffer.get(bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
 
                 // HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
-                BlockWorker.run(bytes);
+                BlockWorker.run(bytes, remain);
             }
             // last update, clear the badTraceIdSet
-            HANDLER_THREAD_POOL.execute(() -> updateWrongTraceId(errTraceIdSet, pos));
-            HANDLER_THREAD_POOL.execute(() -> smallBucket.quit());
-            HANDLER_THREAD_POOL.execute(this::callFinish);
+            updateWrongTraceId();
+            smallBucket.quit();
+            callFinish();
             input.close();
+            logger.info("finish");
         } catch (Exception e) {
             logger.warn("拉取数据流的过程中产生错误！", e);
         }
@@ -122,22 +122,17 @@ public class ClientDataStreamHandler implements Runnable {
 
     /**
      * call backend to update the wrongTraceIdList
-     *
-     * @param badTraceIdSet
-     * @param pos
      */
-    private static void updateWrongTraceId(Set<String> badTraceIdSet, int pos) {
-        String json = JSON.toJSONString(badTraceIdSet);
-        if (badTraceIdSet.size() > 0) {
-            // send badTraceIdList and its pos to the backend
-            String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
-                    , Constants.UPDATE_TYPE, json, pos);
-            UPDATE_THREAD.execute(() -> websocket.sendTextFrame(msg));
-            // websocket.sendTextFrame(msg);
-            logger.info("成功上报pos {} 的wrongTraceId...", pos);
-        }
+    private static void updateWrongTraceId() {
+        String json = JSON.toJSONString(errTraceIdSet);
+        // send badTraceIdList and its pos to the backend
+        String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
+                , Constants.UPDATE_TYPE, json, pos);
+        UPDATE_THREAD.execute(() -> websocket.sendTextFrame(msg));
+        // websocket.sendTextFrame(msg);
+        logger.info("成功上报pos {} 的wrongTraceId...", pos);
         // auto clear after update
-        badTraceIdSet.clear();
+        errTraceIdSet.clear();
     }
 
     /**
@@ -226,7 +221,7 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     /**
-     * 处理读取出来的一块数据，作为一个worker提交到一个单线程池的任务队列中
+     * 处理读取出来的一块数据，作为一个worker直接执行
      */
     private static class BlockWorker {
         byte[] bytes;
@@ -235,8 +230,7 @@ public class ClientDataStreamHandler implements Runnable {
             this.bytes = bytes;
         }
 
-        public static void run(byte[] bytes) {
-            int len = bytes.length;
+        public static void run(byte[] bytes, int remain) {
             // 一行的开始位置
             int lineStartPos = 0;
             // 一行的结束位置
@@ -253,11 +247,7 @@ public class ClientDataStreamHandler implements Runnable {
             StringBuilder tagsBuilder = new StringBuilder();
             byte spl = 124; // |
             byte lf = 10;   // \n
-            // error=1 [101, 114, 114, 111, 114, 61, 49]
-            // http.status_code=200 [104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61, 50, 48, 48]
-            // 200 [50, 48, 48]
-            // http.status_code= [104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61]
-            for (int i = 0; i < len; i++) {
+            for (int i = 0; i < remain; i++) {
                 // 124 == |，分隔符
                 if (bytes[i] == spl) {
                     Icount += 1;
@@ -267,10 +257,6 @@ public class ClientDataStreamHandler implements Runnable {
                     if (Icount == 8) {
                         tagsStartPos = i + 1;
                     }
-                }
-                // 处在可以判断标签的地方
-                if (Icount == 8) {
-
                 }
                 // 10 == \n，换行
                 if (bytes[i] == lf) {
@@ -297,7 +283,7 @@ public class ClientDataStreamHandler implements Runnable {
                     // 先切换大桶，再切小桶
                     if (lineCount % Constants.UPDATE_INTERVAL == 0) {
                         // 更新错误链路id到backend
-                        updateWrongTraceId(errTraceIdSet, pos);
+                        updateWrongTraceId();
                         pos = (int) lineCount / Constants.UPDATE_INTERVAL;
                         bigBucketPos = pos % Constants.CLIENT_BIG_BUCKET_COUNT;
                         // switch to next big bucket
@@ -322,12 +308,16 @@ public class ClientDataStreamHandler implements Runnable {
                 }
             }
             // 将最后一部分不完整行导入lineBuilder
-            if (len - 1 >= lineEndPos + 1) {
-                lineBuilder.append(new String(bytes, lineEndPos + 1, len - lineEndPos - 1));
+            if (remain - 1 >= lineEndPos + 1) {
+                lineBuilder.append(new String(bytes, lineEndPos + 1, remain - lineEndPos - 1));
             }
         }
 
+        /**
+         * 性能瓶颈，但是显然不知道怎么优化
+         */
         private static void handleLine(byte[] bytes, String traceId, String tags, int preBlockPos, int blockPos) {
+            // TODO 这里维护一个集中的pos，到时候收集的时候就直接收集这一组start到end就可以了
             List<byte[]> spanList = smallBucket.computeIfAbsent(traceId);
             byte[] tmp = new byte[blockPos - preBlockPos];
             System.arraycopy(bytes, preBlockPos, tmp, 0, blockPos - preBlockPos);

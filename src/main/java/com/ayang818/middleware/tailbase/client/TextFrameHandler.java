@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.utils.WsClient;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.asynchttpclient.ws.WebSocketListener;
 import org.asynchttpclient.ws.WebSocketUpgradeHandler;
@@ -12,6 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * @author 杨丰畅
@@ -35,21 +38,18 @@ public class TextFrameHandler {
                     JSONObject jsonObject = JSON.parseObject(payload);
                     int type = jsonObject.getObject("type", Integer.class);
 
-                    switch (type) {
-                        case Constants.PULL_TRACE_DETAIL_TYPE:
-                            Set<String> wrongTraceIdList = jsonObject.getObject("traceIdSet",
-                                    new TypeReference<Set<String>>() {});
-                            Integer pos = jsonObject.getObject("pos", Integer.class);
-                            String wrongTraceDetails =
-                                    ClientDataStreamHandler.getWrongTracing(wrongTraceIdList,
-                                            pos);
-                            String msg = String.format("{\"type\": %d, \"data\": %s, " +
-                                            "\"dataPos\": %d}",
-                                    Constants.TRACE_DETAIL, wrongTraceDetails, pos);
-                            ClientDataStreamHandler.websocket.sendTextFrame(msg);
-                            break;
-                        default:
-                            break;
+                    if (type == Constants.PULL_TRACE_DETAIL_TYPE) {
+                        Set<String> wrongTraceIdList = jsonObject.getObject("traceIdSet",
+                                new TypeReference<Set<String>>() {
+                                });
+                        Integer pos = jsonObject.getObject("pos", Integer.class);
+                        String wrongTraceDetails =
+                                ClientDataStreamHandler.getWrongTracing(wrongTraceIdList,
+                                        pos);
+                        String msg = String.format("{\"type\": %d, \"data\": %s, " +
+                                        "\"dataPos\": %d}",
+                                Constants.TRACE_DETAIL, wrongTraceDetails, pos);
+                        ClientDataStreamHandler.websocket.sendTextFrame(msg);
                     }
                 }
 

@@ -1,6 +1,5 @@
 package com.ayang818.middleware.tailbase.utils;
 
-import com.ayang818.middleware.tailbase.Constants;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.AsyncHttpClient;

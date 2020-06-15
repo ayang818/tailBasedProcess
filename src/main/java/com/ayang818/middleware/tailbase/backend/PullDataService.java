@@ -71,11 +71,8 @@ public class PullDataService implements Runnable {
                 // 发送取到的errTraceId 和 对应的 pos
                 Set<String> badTraceIdSet = bucket.getTraceIdSet();
                 int pos = bucket.getPos();
-
-                if (!badTraceIdSet.isEmpty()) {
-                    // pull data from each client, then MessageHandler will consume these data
-                    MessageHandler.pullWrongTraceDetails(JSON.toJSONString(badTraceIdSet), pos);
-                }
+                // pull data from each client, then MessageHandler will consume these data
+                MessageHandler.pullWrongTraceDetails(JSON.toJSONString(badTraceIdSet), pos);
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
