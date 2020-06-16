@@ -41,6 +41,10 @@ public class TraceIndexBucket {
      * @return true means success
      */
     public boolean tryEnter(int retryTimes, int sleepTime, int pos, int innerPos) {
+        return tryEnter(retryTimes, sleepTime);
+    }
+
+    public boolean tryEnter(int retryTimes, int sleepTime) {
         int i = 0;
         while (i < retryTimes) {
             i += 1;

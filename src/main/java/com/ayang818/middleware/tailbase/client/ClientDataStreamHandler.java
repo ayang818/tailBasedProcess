@@ -190,12 +190,12 @@ public class ClientDataStreamHandler implements Runnable {
         BigBucket bigBucket = BUCKET_TRACE_LIST.get(bucketPos);
         List<TraceIndexBucket> traceIndexBucketList = bigBucket.getSmallBucketList();
         List<byte[]> tmpDataBucket = DATA_LIST.get(bucketPos);
+        List<String> spans;
         int bucketCount = Constants.CLIENT_BIG_BUCKET_COUNT;
         int tmpBlockOffset;
         int tmpStartPos;
         int tmpEndPos;
         byte[] tmpBlock;
-        List<String> spans;
 
         for (TraceIndexBucket traceIndexBucket : traceIndexBucketList) {
             if (traceIndexBucket.tryEnter(50, 5, pos, innerPos)) {
@@ -223,14 +223,13 @@ public class ClientDataStreamHandler implements Runnable {
                                 if (tmpDataBucket.size() > tmpBlockOffset + 1) {
                                     byte[] bytes = tmpDataBucket.get(tmpBlockOffset + 1);
                                     secondPart = new String(bytes, 0, tmpEndPos);
-                                    addedSpan = firstPart + secondPart;
                                 } else {
                                     // 不是一个bucket中的
                                     List<byte[]> bytesList = DATA_LIST.get((bucketPos + 1) % Constants.CLIENT_BIG_BUCKET_COUNT);
                                     byte[] nextBlock = bytesList.get(0);
                                     secondPart = new String(nextBlock, 0, tmpEndPos);
-                                    addedSpan = firstPart + secondPart;
                                 }
+                                addedSpan = firstPart + secondPart;
                                 spans = wrongTraceMap.computeIfAbsent(traceId, k -> new ArrayList<>());
                                 spans.add(addedSpan);
                             }
@@ -326,13 +325,13 @@ public class ClientDataStreamHandler implements Runnable {
                     if (isFirstLine) {
                         String linePart = new String(bytes, lineStartPos, lineEndPos - lineStartPos);
                         lineBuilder.append(linePart);
-                        handleLine(lineBuilder.toString(), traceIdBuilder, tagsBuilder, i);
+                        handleLine(lineBuilder.toString(), traceIdBuilder, tagsBuilder, lineEndPos);
                         isFirstLine = false;
                     } else {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
                         String tags = new String(bytes, tagsStartPos, lineEndPos - tagsStartPos);
-                        handleLine(bytes, traceId, tags, lineStartPos, lineEndPos);
+                        handleLine(traceId, tags, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
                     }
@@ -373,19 +372,21 @@ public class ClientDataStreamHandler implements Runnable {
             if (remain - 1 >= lineEndPos + 1) {
                 lineBuilder.append(new String(bytes, lineEndPos + 1, remain - lineEndPos - 1));
                 lastPartLineStartPos = lineEndPos + 1;
+            } else {
+                lastPartLineStartPos = remain;
             }
         }
 
         /**
          * 性能瓶颈，但是显然不知道怎么优化
          */
-        private static void handleLine(byte[] bytes, String traceId, String tags, int startPos, int endPos) {
+        private static void handleLine(String traceId, String tags, int startPos, int endPos) {
             // TODO 不再维护完整的数据，而是维护索引
             List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
             // if startPos > endPos, 说明此行跨block
             // 这里传过来-1???
-            if (dataBucket.size() == 0) System.exit(0);
+            if (dataBucket.size() == 0) return ;
             spanList.add(new int[]{dataBucket.size() - 1, startPos, endPos});
 
             if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
@@ -425,7 +426,19 @@ public class ClientDataStreamHandler implements Runnable {
             String tags = tagsBuilder.toString();
 
             List<int[]> tmpIndexList = traceIndexBucket.computeIfAbsent(traceId);
-            tmpIndexList.add(new int[]{dataBucket.size() - 1, lastPartLineStartPos, firstPartLineEndPos});
+            // TODO 前一个block
+            int prePos;
+            if (dataBucket.size() - 2 < 0) {
+                int preBucketPos = (bigBucketPos - 1) < 0 ? Constants.CLIENT_BIG_BUCKET_COUNT - 1 : bigBucketPos % Constants.CLIENT_BIG_BUCKET_COUNT;
+                prePos = DATA_LIST.get(preBucketPos).size() - 1;
+                if (prePos < 0) {
+                    logger.warn("preBucketPos {} 已经被清除...", preBucketPos);
+                    return ;
+                }
+            } else {
+                prePos = dataBucket.size() - 2;
+            }
+            tmpIndexList.add(new int[]{prePos, lastPartLineStartPos, firstPartLineEndPos});
 
             if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
                 errTraceIdSet.add(traceId);
