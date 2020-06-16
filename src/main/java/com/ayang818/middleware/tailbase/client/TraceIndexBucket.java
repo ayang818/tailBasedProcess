@@ -6,9 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -22,19 +20,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @author : chengyi
  * @date : 2020-06-13 20:34
  **/
-public class SmallBucket {
+public class TraceIndexBucket {
     private final AtomicBoolean isWorking;
     // key is traceId, value is all spans
-    private final Map<String, List<byte[]>> data;
-    private static final Logger logger = LoggerFactory.getLogger(SmallBucket.class);
+    private final Map<String, List<int[]>> indexes;
+    private static final Logger logger = LoggerFactory.getLogger(TraceIndexBucket.class);
 
-    public SmallBucket(int size) {
+    public TraceIndexBucket(int size) {
         isWorking = new AtomicBoolean(false);
-        data = new ConcurrentHashMap<>(size);
+        indexes = new ConcurrentHashMap<>(size);
     }
 
-    public List<byte[]> getSpans(String traceId) {
-        return data.get(traceId);
+    public List<int[]> getSpansIndex(String traceId) {
+        return indexes.get(traceId);
     }
 
     /**
@@ -68,11 +66,11 @@ public class SmallBucket {
         this.isWorking.compareAndSet(true, false);
     }
 
-    public List<byte[]> computeIfAbsent(String traceId) {
-        return data.computeIfAbsent(traceId, k -> new ArrayList<>());
+    public List<int[]> computeIfAbsent(String traceId) {
+        return indexes.computeIfAbsent(traceId, k -> new ArrayList<>());
     }
 
     public void clear() {
-        data.clear();
+        indexes.clear();
     }
 }

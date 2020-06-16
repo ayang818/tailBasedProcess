@@ -13,6 +13,8 @@ import java.util.concurrent.*;
  **/
 public class DataStorage {
     public static List<BigBucket> BUCKET_TRACE_LIST = new ArrayList<>(Constants.CLIENT_BIG_BUCKET_COUNT);
+    // 一个pos中对应bucket的所有block数据，一个pos位置的bucket大致有10个block
+    public static List<List<byte[]>> DATA_LIST = new ArrayList<>(Constants.CLIENT_BIG_BUCKET_COUNT);
 
     public static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60,
             TimeUnit.SECONDS,

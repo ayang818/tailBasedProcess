@@ -49,6 +49,8 @@ public class TextFrameHandler {
                         String msg = String.format("{\"type\": %d, \"data\": %s, " +
                                         "\"dataPos\": %d}",
                                 Constants.TRACE_DETAIL, wrongTraceDetails, pos);
+
+                        logger.info("textframe size {}", msg.getBytes().length);
                         ClientDataStreamHandler.websocket.sendTextFrame(msg);
                     }
                 }

@@ -9,26 +9,26 @@ import java.util.List;
  * 大桶，存储一个小桶列表
  */
 public class BigBucket {
-    List<SmallBucket> smallBuckets;
+    List<TraceIndexBucket> traceIndexBuckets;
 
     public BigBucket() {
-        this.smallBuckets = new ArrayList<>(Constants.CLIENT_SMALL_BUCKET_COUNT);
+        this.traceIndexBuckets = new ArrayList<>(Constants.CLIENT_SMALL_BUCKET_COUNT);
     }
 
-    public SmallBucket getSmallBucket(int innerPos) {
+    public TraceIndexBucket getSmallBucket(int innerPos) {
         if (innerPos < 0 || innerPos > Constants.CLIENT_SMALL_BUCKET_COUNT) {
             throw new IndexOutOfBoundsException(String.format("innerPos %d out of bigBucket", innerPos));
         }
-        return smallBuckets.get(innerPos);
+        return traceIndexBuckets.get(innerPos);
     }
 
-    public List<SmallBucket> getSmallBucketList() {
-        return smallBuckets;
+    public List<TraceIndexBucket> getSmallBucketList() {
+        return traceIndexBuckets;
     }
 
     public void init() {
         for (int i = 0; i < Constants.CLIENT_SMALL_BUCKET_COUNT; i++) {
-            smallBuckets.add(new SmallBucket(Constants.CLIENT_SMALL_BUCKET_MAP_SIZE));
+            traceIndexBuckets.add(new TraceIndexBucket(Constants.CLIENT_SMALL_BUCKET_MAP_SIZE));
         }
     }
 }
