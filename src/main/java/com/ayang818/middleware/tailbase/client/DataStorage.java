@@ -7,10 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * @author 杨丰畅
@@ -30,5 +27,5 @@ public class DataStorage {
 
     public static ExecutorService HANDLER_THREAD_POOL;
 
-    public static final Queue<String> updateDataQueue = new LinkedList<>();
+    public static final Queue<String> updateDataQueue = new LinkedBlockingQueue<>();
 }

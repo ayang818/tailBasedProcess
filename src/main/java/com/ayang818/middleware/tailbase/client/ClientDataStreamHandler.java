@@ -45,8 +45,6 @@ public class ClientDataStreamHandler implements Runnable {
     private static volatile int innerPos = 0;
     // pos % BIG_BUCKET_COUNT
     private static volatile int bigBucketPos = 0;
-    // byte[] 在对应bucket中的offset
-    private static volatile int blockOffset = -1;
     private static volatile BigBucket bigBucket;
     private static volatile TraceIndexBucket traceIndexBucket;
     private static volatile List<byte[]> dataBucket;
@@ -71,7 +69,7 @@ public class ClientDataStreamHandler implements Runnable {
                 new DefaultThreadFactory("line-handler"),
                 new ThreadPoolExecutor.AbortPolicy());
 
-        UPDATE_THREAD = new ThreadPoolExecutor(1, 1, 60,
+        UPDATE_THREAD = new ThreadPoolExecutor(2, 2, 60,
                 TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(1000), new DefaultThreadFactory("update_thread"));
     }
@@ -111,7 +109,6 @@ public class ClientDataStreamHandler implements Runnable {
             traceIndexBucket.tryEnter(1, 5, pos, innerPos);
             // use block read
             while (channel.read(byteBuffer) != -1) {
-                // blockOffset += 1;
                 ((Buffer) byteBuffer).flip();
                 int remain = byteBuffer.remaining();
                 bytes = new byte[remain];
