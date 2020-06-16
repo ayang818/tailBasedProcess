@@ -43,7 +43,7 @@ public class WSStarter {
                         pipeline.addLast(new ChunkedWriteHandler());
                         pipeline.addLast(new HttpObjectAggregator(100 * 1024 * 1024, false));
 
-                        pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null, false, 409600));
+                        pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null, false, 4096000));
                         messageHandler = new MessageHandler();
                         pipeline.addLast(messageHandler);
 

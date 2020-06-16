@@ -3,6 +3,7 @@ package com.ayang818.middleware.tailbase.client;
 import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.BasicHttpHandler;
 import com.ayang818.middleware.tailbase.Constants;
+import com.ayang818.middleware.tailbase.common.Resp;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import com.google.common.collect.Sets;
 import io.netty.util.concurrent.DefaultThreadFactory;
@@ -10,7 +11,6 @@ import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
@@ -19,12 +19,11 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
@@ -55,6 +54,7 @@ public class ClientDataStreamHandler implements Runnable {
     private static volatile Set<String> errTraceIdSet;
     // 上一个block最后一条不完整数据的起点（不包含|）
     private static volatile int lastPartLineStartPos;
+    private static boolean isFin = false;
 
     private static final StringBuilder lineBuilder = new StringBuilder();
 
@@ -71,9 +71,9 @@ public class ClientDataStreamHandler implements Runnable {
                 new DefaultThreadFactory("line-handler"),
                 new ThreadPoolExecutor.AbortPolicy());
 
-        UPDATE_THREAD = new ThreadPoolExecutor(3, 3, 60,
+        UPDATE_THREAD = new ThreadPoolExecutor(1, 1, 60,
                 TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(10000), new DefaultThreadFactory("update_thread"));
+                new ArrayBlockingQueue<>(1000), new DefaultThreadFactory("update_thread"));
     }
 
     public static void start() {
@@ -121,6 +121,7 @@ public class ClientDataStreamHandler implements Runnable {
                 // HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
                 BlockWorker.run(bytes, remain);
             }
+            isFin = true;
             // last update, clear the badTraceIdSet
             updateWrongTraceId();
             traceIndexBucket.quit();
@@ -139,10 +140,23 @@ public class ClientDataStreamHandler implements Runnable {
     private static void updateWrongTraceId() {
         String json = JSON.toJSONString(errTraceIdSet);
         // send badTraceIdList and its pos to the backend
-        String msg = String.format("{\"type\": %d, \"badTraceIdSet\": %s, \"pos\": %d}"
-                , Constants.UPDATE_TYPE, json, pos);
-        UPDATE_THREAD.execute(() -> websocket.sendTextFrame(msg));
-        logger.info("成功上报pos {} 的wrongTraceId...", pos);
+        String msg = String.format("{\"badTraceIdSet\": %s, \"pos\": %d}"
+                , json, pos);
+        updateDataQueue.offer(msg);
+
+        if (updateDataQueue.size() >= 10 || isFin) {
+            StringBuilder res = new StringBuilder();
+            res.append("{");
+            res.append(String.format("\"type\": %d,", Constants.UPDATE_TYPE)).append("\"data\": [");
+            while (updateDataQueue.size() > 0) {
+                String tmp = updateDataQueue.poll();
+                res.append("'").append(tmp).append("'").append(",");
+            }
+            res.append("]");
+            res.append("}");
+            UPDATE_THREAD.execute(() -> websocket.sendTextFrame(res.toString()));
+            logger.info("成功上报pos {} 前的wrongTraceId...", pos);
+        }
         // auto clear after update
         errTraceIdSet.clear();
     }
@@ -154,7 +168,7 @@ public class ClientDataStreamHandler implements Runnable {
      * @param pos
      * @return
      */
-    public static String getWrongTracing(Set<String> wrongTraceIdSet, int pos) {
+    public static void getWrongTracing(Set<String> wrongTraceIdSet, int pos, List<Resp> res) {
         int bucketCount = Constants.CLIENT_BIG_BUCKET_COUNT;
         // calculate the three continue pos
         int curr = pos % bucketCount;
@@ -171,9 +185,8 @@ public class ClientDataStreamHandler implements Runnable {
         getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap, false);
         getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap, false);
 
-        String res = JSON.toJSONString(wrongTraceMap);
         // logger.info(res);
-        return res;
+        res.add(new Resp(pos, wrongTraceMap));
     }
 
     /**
@@ -285,7 +298,6 @@ public class ClientDataStreamHandler implements Runnable {
         }
 
         public static void run(byte[] bytes, int remain) {
-            // TODO 在转换pos前添加，这意味着，即使一个block跨bucket，他也是属于前一个bucket，这样可能导致极小部分数据错误
             dataBucket.add(bytes);
             // 一行的开始位置
             int lineStartPos = 0;
@@ -348,6 +360,7 @@ public class ClientDataStreamHandler implements Runnable {
                         bigBucket = BUCKET_TRACE_LIST.get(bigBucketPos);
                         // switch to next data bucket
                         dataBucket = DATA_LIST.get(bigBucketPos);
+                        // 由于还在处理同一块block，所以还是需要再次添加
                         dataBucket.add(bytes);
                     }
 
@@ -385,7 +398,6 @@ public class ClientDataStreamHandler implements Runnable {
             List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
             // if startPos > endPos, 说明此行跨block
-            // 这里传过来-1???
             if (dataBucket.size() == 0) return ;
             spanList.add(new int[]{dataBucket.size() - 1, startPos, endPos});
 
@@ -426,7 +438,7 @@ public class ClientDataStreamHandler implements Runnable {
             String tags = tagsBuilder.toString();
 
             List<int[]> tmpIndexList = traceIndexBucket.computeIfAbsent(traceId);
-            // TODO 前一个block
+            // 发送上一个block的位置
             int prePos;
             if (dataBucket.size() - 2 < 0) {
                 int preBucketPos = (bigBucketPos - 1) < 0 ? Constants.CLIENT_BIG_BUCKET_COUNT - 1 : bigBucketPos % Constants.CLIENT_BIG_BUCKET_COUNT;

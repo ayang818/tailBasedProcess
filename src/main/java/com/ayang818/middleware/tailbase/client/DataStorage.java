@@ -3,8 +3,14 @@ package com.ayang818.middleware.tailbase.client;
 import com.ayang818.middleware.tailbase.Constants;
 import io.netty.util.concurrent.DefaultThreadFactory;
 
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author 杨丰畅
@@ -23,4 +29,6 @@ public class DataStorage {
     public static ExecutorService UPDATE_THREAD;
 
     public static ExecutorService HANDLER_THREAD_POOL;
+
+    public static final Queue<String> updateDataQueue = new LinkedList<>();
 }

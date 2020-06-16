@@ -4,6 +4,8 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
 import com.ayang818.middleware.tailbase.Constants;
+import com.ayang818.middleware.tailbase.common.Caller;
+import com.ayang818.middleware.tailbase.common.Resp;
 import com.ayang818.middleware.tailbase.utils.BaseUtils;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -11,17 +13,12 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
-import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,8 +27,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static com.ayang818.middleware.tailbase.Constants.TARGET_PROCESS_COUNT;
 import static com.ayang818.middleware.tailbase.Constants.BACKEND_BUCKET_COUNT;
+import static com.ayang818.middleware.tailbase.Constants.TARGET_PROCESS_COUNT;
 import static com.ayang818.middleware.tailbase.backend.PullDataService.resMap;
 
 /**
@@ -72,20 +69,24 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
         switch (type) {
             case Constants.UPDATE_TYPE:
-                Set<String> badTraceIdSet = jsonObject.getObject("badTraceIdSet",
-                        new TypeReference<Set<String>>() {
-                        });
-                int pos = jsonObject.getObject("pos", Integer.class);
-                // logger.info("收到client pos {} 的update", pos);
-                setWrongTraceId(badTraceIdSet, pos);
+                List<String> data = jsonObject.getObject("data", new TypeReference<List<String>>(){});
+                Set<String> badTraceIdSet;
+                int pos;
+                for (String updateDto : data) {
+                    JSONObject tmp = JSON.parseObject(updateDto);
+                    badTraceIdSet = tmp.getObject("badTraceIdSet", new TypeReference<Set<String>>(){});
+                    pos = tmp.getObject("pos", Integer.class);
+                    setWrongTraceId(badTraceIdSet, pos);
+                }
                 break;
             case Constants.TRACE_DETAIL:
-                Map<String, List<String>> spans = jsonObject.getObject("data",
-                        new TypeReference<Map<String, List<String>>>() {
+                List<Resp> respDetails = jsonObject.getObject("data",
+                        new TypeReference<List<Resp>>() {
                         });
-                // pull data from this pos, here is for a recent ack!
-                int dataPos = jsonObject.getObject("dataPos", Integer.class);
-                consumeTraceDetails(spans, dataPos);
+                for (Resp resp : respDetails) {
+                    // pull data from this pos, here is for a recent ack!
+                    consumeTraceDetails(resp.getData(), resp.getDataPos());
+                }
                 break;
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
@@ -155,6 +156,17 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     }
 
     /**
+     * 批量拉取数据
+     * @param traceIdBucketList
+     */
+    public static void pullWrongTraceDetails(List<Caller.PullDataBucket> traceIdBucketList) {
+        Caller caller = new Caller(Constants.PULL_TRACE_DETAIL_TYPE, traceIdBucketList);
+        String msg = JSON.toJSONString(caller);
+        channels.writeAndFlush(new TextWebSocketFrame(msg));
+        logger.info("发送拉取bucket data请求.....");
+    }
+
+    /**
      * 将client主动推送过来的错误traceIdList，放置到backend 等待消费的 对应位置的 bucket 中
      *
      * @param badTraceIdSet
@@ -189,7 +201,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         // bucket中元素是否消费完
         for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
             if (traceIdBucket.getPos() != -1) {
-                logger.info("{} pos处仍在等待",traceIdBucket.getPos());
+                logger.info("{} pos处仍在等待", traceIdBucket.getPos());
                 return false;
             }
         }

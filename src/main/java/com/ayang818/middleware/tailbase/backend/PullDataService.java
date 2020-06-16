@@ -2,6 +2,7 @@ package com.ayang818.middleware.tailbase.backend;
 
 import com.alibaba.fastjson.JSON;
 import com.ayang818.middleware.tailbase.BasicHttpHandler;
+import com.ayang818.middleware.tailbase.common.Caller;
 import com.ayang818.middleware.tailbase.utils.BaseUtils;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import okhttp3.FormBody;
@@ -11,9 +12,9 @@ import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.*;
 
 /**
@@ -33,47 +34,50 @@ public class PullDataService implements Runnable {
     private static final ExecutorService START_POOL = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("backend-starter"));
 
+    private static int timer = 0;
+    private static boolean flag = false;
+    private static boolean started = false;
+
     public static void start() {
         START_POOL.execute(new PullDataService());
     }
-
-    private static int timer = 0;
 
     @Override
     public void run() {
         try {
             while (BasicHttpHandler.getDataSourcePort() == null) {}
             while (true) {
-                TraceIdBucket bucket = null;
-
                 // 0.5 秒没有得到新的可以消费的数据，检查是否结束
-                bucket = blockingQueue.poll(5, TimeUnit.MILLISECONDS);
-
-                if (bucket == null) {
-                    // 考虑是否已经全部消费完了
-                    if (MessageHandler.isFin()) {
-                        if (sendCheckSum()) {
-                            break;
-                        }
-                    }
-                    timer += 1;
-                    Thread.sleep(15);
-                    // TODO delete
-                    if (timer >= 500) {
-                        // 如果重试次数超过1s，说明程序可能有问题，结束评测，免得等很长时间
-                        logger.info("重试时间超过1s，直接发送checkSum");
-                        sendCheckSum();
+                while (true) {
+                    if (blockingQueue.size() != 0) {
                         break;
                     }
-                    continue;
+                    timer += 1;
+                    if (MessageHandler.isFin()) {
+                        sendCheckSum();
+                        flag = true;
+                        break;
+                    }
+                    Thread.sleep(20);
+                    if (timer >= 75 && started) {
+                        // 如果重试次数超过2s，说明程序可能有问题，结束评测，免得等很长时间
+                        logger.info("重试时间超过1.5s，直接发送checkSum");
+                        sendCheckSum();
+                        flag = true;
+                        break;
+                    }
                 }
-                // 获取到了bucket，timer置为0
+                if (flag) break;
+                // 可以bucket，timer置为0
                 timer = 0;
-                // 发送取到的errTraceId 和 对应的 pos
-                Set<String> badTraceIdSet = bucket.getTraceIdSet();
-                int pos = bucket.getPos();
+                started = true;
+                List<Caller.PullDataBucket> traceIdBucketList = new ArrayList<>();
+                while (blockingQueue.size() > 0) {
+                    TraceIdBucket traceIdBucket = blockingQueue.poll();
+                    traceIdBucketList.add(new Caller.PullDataBucket(traceIdBucket.getTraceIdSet(), traceIdBucket.getPos()));
+                }
                 // pull data from each client, then MessageHandler will consume these data
-                MessageHandler.pullWrongTraceDetails(JSON.toJSONString(badTraceIdSet), pos);
+                MessageHandler.pullWrongTraceDetails(traceIdBucketList);
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
