@@ -106,7 +106,7 @@ public class ClientDataStreamHandler implements Runnable {
 
             byte[] bytes;
             // marked as a working small bucket
-            traceIndexBucket.tryEnter(1, 5, pos, innerPos);
+            traceIndexBucket.tryEnter();
             // use block read
             while (channel.read(byteBuffer) != -1) {
                 ((Buffer) byteBuffer).flip();
@@ -208,7 +208,7 @@ public class ClientDataStreamHandler implements Runnable {
         byte[] tmpBlock;
 
         for (TraceIndexBucket traceIndexBucket : traceIndexBucketList) {
-            if (traceIndexBucket.tryEnter(50, 5, pos, innerPos)) {
+            if (traceIndexBucket.tryEnter()) {
                 // 这里看起来像是O(n^2)的操作，但是实际上traceIdSet的大小基本都非常小
                 for (String traceId : errTraceIdSet) {
                     List<int[]> spansIndexes = traceIndexBucket.getSpansIndex(traceId);
@@ -224,7 +224,6 @@ public class ClientDataStreamHandler implements Runnable {
                                 spans = wrongTraceMap.computeIfAbsent(traceId, k -> new ArrayList<>());
                                 spans.add(new String(tmpBlock, tmpStartPos, tmpEndPos - tmpStartPos));
                             } else {
-                                // TODO 切的时候有问题
                                 // 先收集本block中的内容
                                 String firstPart = new String(tmpBlock, tmpStartPos, tmpBlock.length - tmpStartPos);
                                 String secondPart;
@@ -306,25 +305,25 @@ public class ClientDataStreamHandler implements Runnable {
             int tagsStartPos = 0;
             // | 计数，每换行重置0
             int Icount = 0;
-
             boolean isFirstLine = true;
             StringBuilder traceIdBuilder = new StringBuilder();
             StringBuilder tagsBuilder = new StringBuilder();
             byte spl = 124; // |
             byte lf = 10;   // \n
+            byte bt;
             for (int i = 0; i < remain; i++) {
                 // 124 == |，分隔符
-                if (bytes[i] == spl) {
+                bt = bytes[i];
+                if (bt == spl) {
                     Icount += 1;
                     if (Icount == 1) {
                         traceIdEndPos = i;
-                    }
-                    if (Icount == 8) {
+                    } else if (Icount == 8) {
                         tagsStartPos = i + 1;
                     }
                 }
                 // 10 == \n，换行
-                if (bytes[i] == lf) {
+                if (bt == lf) {
                     lineStartPos = lineEndPos + 1;
                     lineEndPos = i;
                     lineCount += 1;
@@ -370,7 +369,8 @@ public class ClientDataStreamHandler implements Runnable {
                             innerPos += 1;
                         }
                         traceIndexBucket = bigBucket.getSmallBucket(innerPos);
-                        if (!traceIndexBucket.tryEnter(100, 10, pos, innerPos)) {
+                        // TODO 这里是不是性能瓶颈
+                        if (!traceIndexBucket.tryEnter()) {
                             traceIndexBucket.clear();
                             traceIndexBucket.forceEnter();
                             logger.warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
@@ -391,7 +391,6 @@ public class ClientDataStreamHandler implements Runnable {
          * 性能瓶颈，但是显然不知道怎么优化
          */
         private static void handleLine(String traceId, String tags, int startPos, int endPos) {
-            // TODO 不再维护完整的数据，而是维护索引
             List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
             // if startPos > endPos, 说明此行跨block

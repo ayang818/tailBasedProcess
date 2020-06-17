@@ -36,30 +36,12 @@ public class TraceIndexBucket {
     }
 
     /**
-     * @param retryTimes 重试次数
-     * @param sleepTime 重试睡眠时间
+     * 这里好像很难调，暂时变成阻塞的吧
      * @return true means success
      */
-    public boolean tryEnter(int retryTimes, int sleepTime, int pos, int innerPos) {
-        return tryEnter(retryTimes, sleepTime);
-    }
-
-    public boolean tryEnter(int retryTimes, int sleepTime) {
-        int i = 0;
-        while (i < retryTimes) {
-            i += 1;
-            // logger.info("等待进入 pos {} innerPos {}", pos, innerPos);
-            if (this.isWorking.compareAndSet(false, true)) {
-                return true;
-            } else {
-                try {
-                    Thread.sleep(sleepTime);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-        return false;
+    public boolean tryEnter() {
+        while (!this.isWorking.compareAndSet(false, true)) {}
+        return true;
     }
 
     public void forceEnter() {
