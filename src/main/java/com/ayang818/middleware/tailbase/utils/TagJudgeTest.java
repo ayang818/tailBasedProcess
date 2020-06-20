@@ -1,5 +1,7 @@
 package com.ayang818.middleware.tailbase.utils;
 
+import com.ayang818.middleware.tailbase.client.ClientDataStreamHandler;
+
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
@@ -14,23 +16,37 @@ public class TagJudgeTest {
     public static final byte[][] standardBytes = {
             {101, 114, 114, 111, 114, 61, 49},
             {104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61},
-            {50, 48, 48}};
+            {50, 48, 48},
+            {104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61, 50,
+                    48, 48}};
 
     public static final int[] targetPos = {standardBytes[0].length - 1, standardBytes[1].length - 1,
             standardBytes[2].length - 1};
 
     public static void main(String[] args) throws IOException {
         String path = "D:\\middlewaredata\\tags.data";
+        long startTime = System.currentTimeMillis();
         System.out.println("start...");
         int count1 = 0;
         int count2 = 0;
         BufferedReader bufferedReader = new BufferedReader(new FileReader(path));
         String line;
         while ((line = bufferedReader.readLine()) != null) {
+            String kk = "123" + line;
+            byte[] bytes = kk.getBytes();
+            long tmp = System.nanoTime();
             if (!normalCheck(line)) count1++;
-            if (!checkTags(line)) count2++;
+            if (contains(bytes, 3,
+                    bytes.length, standardBytes[0]) || (contains(bytes, 3, bytes.length,
+                    standardBytes[1]) && !contains(bytes, 3, bytes.length, standardBytes[3]))) count2++;
+            System.out.println(count1 == count2);
         }
+        System.out.println(String.format("cost %dms", System.currentTimeMillis() - startTime));
         System.out.println(count1 == count2);
+    }
+
+    private static boolean contains(byte[] bts, int start, int fin, byte[] str) {
+        return ClientDataStreamHandler.BlockWorker.contains(bts, start, fin, str);
     }
 
     public static boolean normalCheck(String tags) {

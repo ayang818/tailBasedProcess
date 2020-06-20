@@ -26,7 +26,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import static com.ayang818.middleware.tailbase.Constants.standardBytes;
-import static com.ayang818.middleware.tailbase.Constants.targetPos;
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
 /**
@@ -288,7 +287,7 @@ public class ClientDataStreamHandler implements Runnable {
     /**
      * 处理读取出来的一块数据，作为一个worker直接执行
      */
-    private static class BlockWorker {
+    public static class BlockWorker {
         byte[] bytes;
 
         public BlockWorker(byte[] bytes) {
@@ -314,11 +313,6 @@ public class ClientDataStreamHandler implements Runnable {
             byte lf = 10;   // \n
             byte bt;
 
-            boolean isTrueSpan = true;
-            boolean statusShown = false;
-            boolean startPendingStatusCode = false;
-            int[] curPos = {-1, -1, -1};
-            boolean flag = false;
             for (int i = 0; i < remain; i++) {
                 // 124 == |，分隔符
                 bt = bytes[i];
@@ -329,35 +323,6 @@ public class ClientDataStreamHandler implements Runnable {
                     } else if (Icount == 8) {
                         tagsStartPos = i + 1;
                     }
-                }
-                if (Icount == 8) {
-                    for (int j = 0; j < standardBytes.length; j++) {
-                        if (!isTrueSpan) break;
-                        if (statusShown && (j == 1 || j == 2)) continue;
-                        if (!startPendingStatusCode && j == 2) continue;
-                        if (startPendingStatusCode && j == 1) continue;
-                        byte[] bts = standardBytes[j];
-                        if (bt == bts[curPos[j] + 1]) {
-                            curPos[j]++;
-                            if (curPos[j] == targetPos[j]) {
-                                if (j == 0) {
-                                    isTrueSpan = false;
-                                } else if (j == 1) {
-                                    flag = true;
-                                } else {
-                                    statusShown = true;
-                                }
-                            }
-                        } else {
-                            curPos[j] = -1;
-                            if (bt == bts[curPos[j] + 1]) curPos[j]++;
-                            if (j == 2) {
-                                isTrueSpan = false;
-                                statusShown = true;
-                            }
-                        }
-                    }
-                    if (flag) startPendingStatusCode = true;
                 }
                 // 10 == \n，换行
                 if (bt == lf) {
@@ -375,7 +340,7 @@ public class ClientDataStreamHandler implements Runnable {
                     } else {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
-                        handleLine(traceId, isTrueSpan, lineStartPos, lineEndPos);
+                        handleLine(traceId, bytes, tagsStartPos, i, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
                     }
@@ -413,12 +378,6 @@ public class ClientDataStreamHandler implements Runnable {
                         }
                     }
 
-                    // reset judge tag status
-                    isTrueSpan = true;
-                    statusShown = false;
-                    startPendingStatusCode = false;
-                    curPos[0] = curPos[1] = curPos[2] = -1;
-                    flag = false;
                 }
             }
             // 将最后一部分不完整行导入lineBuilder
@@ -433,14 +392,18 @@ public class ClientDataStreamHandler implements Runnable {
         /**
          * 性能瓶颈，但是显然不知道怎么优化
          */
-        private static void handleLine(String traceId, boolean trueSpan, int startPos, int endPos) {
+        private static void handleLine(String traceId, byte[] bytes, int tagsStartPos,
+                                       int tagsEndPos, int startPos,
+                                       int endPos) {
             List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
             // if startPos > endPos, 说明此行跨block
             if (dataBucket.size() == 0) return ;
             spanList.add(new int[]{dataBucket.size() - 1, startPos, endPos});
 
-            if (!trueSpan) {
+            if (contains(bytes, tagsStartPos, tagsEndPos, standardBytes[0]) || (contains(bytes,
+                    tagsStartPos, tagsEndPos, standardBytes[1]) && !contains(bytes,
+                    tagsStartPos, tagsEndPos, standardBytes[2]))) {
                 errTraceIdSet.add(traceId);
             }
         }
@@ -498,6 +461,36 @@ public class ClientDataStreamHandler implements Runnable {
             traceIdBuilder.delete(0, traceIdBuilder.length());
             tagsBuilder.delete(0, tagsBuilder.length());
             lineBuilder.delete(0, lineBuilder.length());
+        }
+
+        public static boolean contains(byte[] value, int start, int fin, byte[] str) {
+            int valueCount = fin - start;
+            int strCount = str.length;
+            if (strCount == 0) {
+                return true;
+            }
+            if (valueCount == 0) {
+                return false;
+            }
+            byte first = str[0];
+            int max = (valueCount - strCount);
+            for (int i = 0; i <= max; i++) {
+                // Look for first character.
+                if (value[i + start] != first) {
+                    while (++i <= max && value[i + start] != first);
+                }
+                // Found first character, now look at the rest of value
+                if (i <= max) {
+                    int j = i + 1;
+                    int end = j + strCount - 1;
+                    for (int k = 1; j < end && value[j + start] == str[k]; j++, k++);
+                    if (j == end) {
+                        // Found whole string.
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
     }
 }

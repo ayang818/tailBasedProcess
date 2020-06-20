@@ -60,7 +60,7 @@ public class PullDataService implements Runnable {
                     }
                     Thread.sleep(10);
                     // TODO
-                    if (timer >= 1000 && started) {
+                    if (timer >= 50 && started) {
                         // 如果重试次数超过0.5s，说明程序可能有问题，结束评测，免得等很长时间
                         logger.info("重试时间超过0.5s，直接发送checkSum");
                         sendCheckSum();

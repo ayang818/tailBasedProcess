@@ -40,8 +40,6 @@ public class Constants {
     public static final byte[][] standardBytes = {
             {101, 114, 114, 111, 114, 61, 49},
             {104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61},
-            {50, 48, 48}};
-
-    public static final int[] targetPos = {standardBytes[0].length - 1, standardBytes[1].length - 1,
-            standardBytes[2].length - 1};
+            {104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61, 50,
+                    48, 48}};
 }
