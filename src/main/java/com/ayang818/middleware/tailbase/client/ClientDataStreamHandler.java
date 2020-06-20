@@ -25,6 +25,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import static com.ayang818.middleware.tailbase.Constants.standardBytes;
+import static com.ayang818.middleware.tailbase.Constants.targetPos;
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
 /**
@@ -311,6 +313,12 @@ public class ClientDataStreamHandler implements Runnable {
             byte spl = 124; // |
             byte lf = 10;   // \n
             byte bt;
+
+            boolean isTrueSpan = true;
+            boolean statusShown = false;
+            boolean startPendingStatusCode = false;
+            int[] curPos = {-1, -1, -1};
+            boolean flag = false;
             for (int i = 0; i < remain; i++) {
                 // 124 == |，分隔符
                 bt = bytes[i];
@@ -321,6 +329,35 @@ public class ClientDataStreamHandler implements Runnable {
                     } else if (Icount == 8) {
                         tagsStartPos = i + 1;
                     }
+                }
+                if (Icount == 8) {
+                    for (int j = 0; j < standardBytes.length; j++) {
+                        if (!isTrueSpan) break;
+                        if (statusShown && (j == 1 || j == 2)) continue;
+                        if (!startPendingStatusCode && j == 2) continue;
+                        if (startPendingStatusCode && j == 1) continue;
+                        byte[] bts = standardBytes[j];
+                        if (bt == bts[curPos[j] + 1]) {
+                            curPos[j]++;
+                            if (curPos[j] == targetPos[j]) {
+                                if (j == 0) {
+                                    isTrueSpan = false;
+                                } else if (j == 1) {
+                                    flag = true;
+                                } else {
+                                    statusShown = true;
+                                }
+                            }
+                        } else {
+                            curPos[j] = -1;
+                            if (bt == bts[curPos[j] + 1]) curPos[j]++;
+                            if (j == 2) {
+                                isTrueSpan = false;
+                                statusShown = true;
+                            }
+                        }
+                    }
+                    if (flag) startPendingStatusCode = true;
                 }
                 // 10 == \n，换行
                 if (bt == lf) {
@@ -338,8 +375,7 @@ public class ClientDataStreamHandler implements Runnable {
                     } else {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
-                        String tags = new String(bytes, tagsStartPos, lineEndPos - tagsStartPos);
-                        handleLine(traceId, tags, lineStartPos, lineEndPos);
+                        handleLine(traceId, isTrueSpan, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
                     }
@@ -376,6 +412,13 @@ public class ClientDataStreamHandler implements Runnable {
                             logger.warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
                         }
                     }
+
+                    // reset judge tag status
+                    isTrueSpan = true;
+                    statusShown = false;
+                    startPendingStatusCode = false;
+                    curPos[0] = curPos[1] = curPos[2] = -1;
+                    flag = false;
                 }
             }
             // 将最后一部分不完整行导入lineBuilder
@@ -390,14 +433,14 @@ public class ClientDataStreamHandler implements Runnable {
         /**
          * 性能瓶颈，但是显然不知道怎么优化
          */
-        private static void handleLine(String traceId, String tags, int startPos, int endPos) {
+        private static void handleLine(String traceId, boolean trueSpan, int startPos, int endPos) {
             List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
             // if startPos > endPos, 说明此行跨block
             if (dataBucket.size() == 0) return ;
             spanList.add(new int[]{dataBucket.size() - 1, startPos, endPos});
 
-            if (tags.contains("error=1") || (tags.contains("http.status_code=") && !tags.contains("http.status_code=200"))) {
+            if (!trueSpan) {
                 errTraceIdSet.add(traceId);
             }
         }
