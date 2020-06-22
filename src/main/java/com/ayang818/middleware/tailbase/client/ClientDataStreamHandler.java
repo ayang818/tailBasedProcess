@@ -346,7 +346,7 @@ public class ClientDataStreamHandler implements Runnable {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
                         // long twoStart = System.nanoTime();
-                        // TODO 性能瓶颈，如何判断一个span是否是错误的/正确的
+                        // TODO 性能瓶颈，如何判断一个span是否是错误的/正确的, tag avg len is 143
                         boolean isWrongSpan = false;
                         if (!contains(bytes,
                                 tagsStartPos, i, standardBytes[2])) {
