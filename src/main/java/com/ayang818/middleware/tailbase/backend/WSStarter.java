@@ -44,7 +44,7 @@ public class WSStarter {
                         pipeline.addLast(new HttpObjectAggregator(100 * 1024 * 1024, false));
 
                         pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null,
-                                false, 4096000));
+                                false, 40960000));
                         messageHandler = new MessageHandler();
                         pipeline.addLast(messageHandler);
 

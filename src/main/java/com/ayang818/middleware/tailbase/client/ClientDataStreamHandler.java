@@ -98,7 +98,7 @@ public class ClientDataStreamHandler implements Runnable {
             InputStream input = httpConnection.getInputStream();
             ReadableByteChannel channel = Channels.newChannel(input);
 
-            ByteBuffer byteBuffer = ByteBuffer.allocateDirect(Constants.INPUT_BUFFER_SIZE);
+            ByteBuffer byteBuffer = ByteBuffer.allocate(Constants.INPUT_BUFFER_SIZE);
 
             bigBucket = BUCKET_TRACE_LIST.get(bigBucketPos);
             errTraceIdSet = Sets.newHashSet();
@@ -110,10 +110,11 @@ public class ClientDataStreamHandler implements Runnable {
             traceIndexBucket.tryEnter();
             // use block read
             while (channel.read(byteBuffer) != -1) {
+                long l = System.nanoTime();
                 ((Buffer) byteBuffer).flip();
                 int remain = byteBuffer.remaining();
                 bytes = new byte[remain];
-                byteBuffer.get(bytes, 0, remain);
+                System.arraycopy(((Buffer) byteBuffer).array(), 0, bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
 
                 // HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
@@ -142,7 +143,7 @@ public class ClientDataStreamHandler implements Runnable {
                 , json, pos);
         updateDataQueue.offer(msg);
 
-        if (updateDataQueue.size() >= 5 || isFin) {
+        if (updateDataQueue.size() >= 10 || isFin) {
             StringBuilder res = new StringBuilder();
             res.append("{");
             res.append(String.format("\"type\": %d,", Constants.UPDATE_TYPE)).append("\"data\": [");
@@ -284,6 +285,8 @@ public class ClientDataStreamHandler implements Runnable {
         }
     }
 
+    static int sum = 0;
+    static int time = 0;
     /**
      * 处理读取出来的一块数据，作为一个worker直接执行
      */
@@ -295,6 +298,7 @@ public class ClientDataStreamHandler implements Runnable {
         }
 
         public static void run(byte[] bytes, int remain) {
+            long oneStart = System.nanoTime();
             dataBucket.add(bytes);
             // 一行的开始位置
             int lineStartPos = 0;
@@ -313,6 +317,8 @@ public class ClientDataStreamHandler implements Runnable {
             byte lf = 10;   // \n
             byte bt;
 
+            int judge = 0;
+            int twoCost = 0;
             for (int i = 0; i < remain; i++) {
                 // 124 == |，分隔符
                 bt = bytes[i];
@@ -330,7 +336,6 @@ public class ClientDataStreamHandler implements Runnable {
                     lineEndPos = i;
                     lineCount += 1;
                     Icount = 0;
-
                     // 结合前一块最后部分，形成完整的一行，按照字符处理
                     if (isFirstLine) {
                         String linePart = new String(bytes, lineStartPos, lineEndPos - lineStartPos);
@@ -340,9 +345,27 @@ public class ClientDataStreamHandler implements Runnable {
                     } else {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
-                        handleLine(traceId, bytes, tagsStartPos, i, lineStartPos, lineEndPos);
+                        // long twoStart = System.nanoTime();
+                        // TODO 性能瓶颈，如何判断一个span是否是错误的/正确的
+                        boolean isWrongSpan = false;
+                        if (!contains(bytes,
+                                tagsStartPos, i, standardBytes[2])) {
+                            if (contains(bytes,
+                                    tagsStartPos, i, standardBytes[1])) {
+                                isWrongSpan = true;
+                            } else if (contains(bytes, tagsStartPos, i, standardBytes[0])) {
+                                isWrongSpan = true;
+                            }
+                        }
+                        // boolean isWrongSpan = (contains(bytes, tagsStartPos, i, standardBytes[0]) || (contains(bytes,
+                        //         tagsStartPos, i, standardBytes[1]) && !contains(bytes,
+                        //         tagsStartPos, i, standardBytes[2])));
+                        // long twoEnd = System.nanoTime();
+                        handleLine(traceId, isWrongSpan, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
+                        // logger.info("match cost {}ns",twoEnd - twoStart);
+                        // twoCost += (twoEnd - twoStart);
                     }
 
                     // 先切换大桶，再切小桶
@@ -350,7 +373,6 @@ public class ClientDataStreamHandler implements Runnable {
                         // 更新错误链路id到backend
                         updateWrongTraceId();
 
-                        // blockOffset = -1;
                         pos = (int) lineCount / Constants.UPDATE_INTERVAL;
                         bigBucketPos = pos % Constants.CLIENT_BIG_BUCKET_COUNT;
                         // switch to next big bucket
@@ -370,7 +392,6 @@ public class ClientDataStreamHandler implements Runnable {
                             innerPos += 1;
                         }
                         traceIndexBucket = bigBucket.getSmallBucket(innerPos);
-                        // TODO 这里是不是性能瓶颈
                         if (!traceIndexBucket.tryEnter()) {
                             traceIndexBucket.clear();
                             traceIndexBucket.forceEnter();
@@ -387,23 +408,28 @@ public class ClientDataStreamHandler implements Runnable {
             } else {
                 lastPartLineStartPos = remain;
             }
+            long oneEnd = System.nanoTime();
+            // for statistic each cost
+            // logger.info("total cost{}, twoCost {}", oneEnd - oneStart, twoCost);
         }
 
         /**
          * 性能瓶颈，但是显然不知道怎么优化
          */
-        private static void handleLine(String traceId, byte[] bytes, int tagsStartPos,
-                                       int tagsEndPos, int startPos,
+        private static void handleLine(String traceId, boolean isTrueSpan, int startPos,
                                        int endPos) {
-            List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
+            // List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
+            List<int[]> spanList;
+            if ((spanList = traceIndexBucket.get(traceId)) == null) {
+                spanList = new ArrayList<>();
+                traceIndexBucket.put(traceId, spanList);
+            }
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
             // if startPos > endPos, 说明此行跨block
             if (dataBucket.size() == 0) return ;
             spanList.add(new int[]{dataBucket.size() - 1, startPos, endPos});
 
-            if (contains(bytes, tagsStartPos, tagsEndPos, standardBytes[0]) || (contains(bytes,
-                    tagsStartPos, tagsEndPos, standardBytes[1]) && !contains(bytes,
-                    tagsStartPos, tagsEndPos, standardBytes[2]))) {
+            if (isTrueSpan) {
                 errTraceIdSet.add(traceId);
             }
         }

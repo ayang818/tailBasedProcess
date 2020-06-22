@@ -24,7 +24,7 @@ public class WsClient {
 
     private static final DefaultAsyncHttpClientConfig config =
             Dsl.config()
-                    .setWebSocketMaxFrameSize(204800)
+                    .setWebSocketMaxFrameSize(4096000)
                     .setEventLoopGroup(new NioEventLoopGroup(4, new DefaultThreadFactory(
                             "pool-websocket")))
                     .build();

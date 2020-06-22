@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,7 +29,7 @@ public class TraceIndexBucket {
 
     public TraceIndexBucket(int size) {
         isWorking = new AtomicBoolean(false);
-        indexes = new ConcurrentHashMap<>(size);
+        indexes = new HashMap<>(size);
     }
 
     public List<int[]> getSpansIndex(String traceId) {
@@ -58,5 +59,13 @@ public class TraceIndexBucket {
 
     public void clear() {
         indexes.clear();
+    }
+
+    public List<int[]> get(String traceId) {
+        return indexes.get(traceId);
+    }
+
+    public void put(String traceId, List<int[]> spanList) {
+        indexes.put(traceId, spanList);
     }
 }

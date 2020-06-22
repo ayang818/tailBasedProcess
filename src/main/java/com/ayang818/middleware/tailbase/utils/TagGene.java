@@ -10,7 +10,7 @@ import java.io.*;
 public class TagGene {
     public static void main(String[] args) throws IOException {
         System.out.println("start...");
-        String path = "D:\\middlewaredata\\trace1.data";
+        String path = "C:\\Users\\10042\\data\\trace1.data";
         BufferedReader reader = new BufferedReader(new FileReader(path));
         String line;
         File file = new File("D:\\middlewaredata\\tags.data");
