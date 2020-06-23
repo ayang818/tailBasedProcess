@@ -285,8 +285,8 @@ public class ClientDataStreamHandler implements Runnable {
         }
     }
 
-    static int sum = 0;
-    static int time = 0;
+    static long sum = 0;
+    static long time = 0;
     /**
      * 处理读取出来的一块数据，作为一个worker直接执行
      */
@@ -298,7 +298,6 @@ public class ClientDataStreamHandler implements Runnable {
         }
 
         public static void run(byte[] bytes, int remain) {
-            long oneStart = System.nanoTime();
             dataBucket.add(bytes);
             // 一行的开始位置
             int lineStartPos = 0;
@@ -345,27 +344,15 @@ public class ClientDataStreamHandler implements Runnable {
                     } else {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
-                        // long twoStart = System.nanoTime();
+
                         // TODO 性能瓶颈，如何判断一个span是否是错误的/正确的, tag avg len is 143
                         boolean isWrongSpan = false;
-                        if (!contains(bytes,
-                                tagsStartPos, i, standardBytes[2])) {
-                            if (contains(bytes,
-                                    tagsStartPos, i, standardBytes[1])) {
-                                isWrongSpan = true;
-                            } else if (contains(bytes, tagsStartPos, i, standardBytes[0])) {
-                                isWrongSpan = true;
-                            }
-                        }
-                        // boolean isWrongSpan = (contains(bytes, tagsStartPos, i, standardBytes[0]) || (contains(bytes,
-                        //         tagsStartPos, i, standardBytes[1]) && !contains(bytes,
-                        //         tagsStartPos, i, standardBytes[2])));
-                        // long twoEnd = System.nanoTime();
+                        isWrongSpan = !contains(bytes,
+                                tagsStartPos, i, standardBytes[2]) && (contains(bytes,
+                                tagsStartPos, i, standardBytes[1]) || contains(bytes, tagsStartPos, i, standardBytes[0]));
                         handleLine(traceId, isWrongSpan, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
-                        // logger.info("match cost {}ns",twoEnd - twoStart);
-                        // twoCost += (twoEnd - twoStart);
                     }
 
                     // 先切换大桶，再切小桶
@@ -408,9 +395,6 @@ public class ClientDataStreamHandler implements Runnable {
             } else {
                 lastPartLineStartPos = remain;
             }
-            long oneEnd = System.nanoTime();
-            // for statistic each cost
-            // logger.info("total cost{}, twoCost {}", oneEnd - oneStart, twoCost);
         }
 
         /**
@@ -487,6 +471,41 @@ public class ClientDataStreamHandler implements Runnable {
             traceIdBuilder.delete(0, traceIdBuilder.length());
             tagsBuilder.delete(0, tagsBuilder.length());
             lineBuilder.delete(0, lineBuilder.length());
+        }
+
+        public static boolean fastContains(byte[] value, int start, int end, byte[] str) {
+            return boyerMoore(value, start, end, str) != -1;
+        }
+
+        public static int boyerMoore(byte[] ori, int start, int end, byte[] pat) {
+            int oriLen = end - start;
+            int patLen = pat.length;
+            int i = pat.length - 1;
+            int j = i;
+            do {
+                if (pat[j] == ori[start + i]) {
+                    if (j == 0) {
+                        return i;
+                    } else {
+                        i--;
+                        j--;
+                    }
+                } else {
+                    i = i + patLen - Math.min(j, 1 + last(ori[i + start], pat));
+                    j = patLen - 1;
+                }
+            } while (i <= oriLen - 1);
+
+            return -1;
+        }
+
+        public static int last(byte c, byte[] pat) {
+            for (int i = pat.length - 1; i >= 0; i--) {
+                if (pat[i] == c) {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         public static boolean contains(byte[] value, int start, int fin, byte[] str) {

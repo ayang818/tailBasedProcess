@@ -42,4 +42,8 @@ public class Constants {
             {104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61},
             {104, 116, 116, 112, 46, 115, 116, 97, 116, 117, 115, 95, 99, 111, 100, 101, 61, 50,
                     48, 48}};
+
+    public static final String[] standardString = {
+            "error=1", "http.status_code", "http.status_code=200"
+    };
 }
