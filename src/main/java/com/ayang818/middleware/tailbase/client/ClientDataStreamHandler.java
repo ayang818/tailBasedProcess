@@ -21,7 +21,6 @@ import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -259,7 +258,7 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     private void callFinish() {
-        websocket.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE));
+        UPDATE_THREAD.execute(() -> websocket.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE)));
         logger.info("已发送 FIN 请求");
     }
 
@@ -342,9 +341,9 @@ public class ClientDataStreamHandler implements Runnable {
 
                         // TODO 性能瓶颈，如何判断一个span是否是错误的/正确的, tag avg len is 143
                         boolean isWrongSpan = false;
-                        isWrongSpan = !contains(bytes,
-                                tagsStartPos, i, standardBytes[2]) && (contains(bytes,
-                                tagsStartPos, i, standardBytes[1]) || contains(bytes, tagsStartPos, i, standardBytes[0]));
+                        isWrongSpan = !fastContains(bytes,
+                                tagsStartPos, i, standardBytes[2]) && (fastContains(bytes,
+                                tagsStartPos, i, standardBytes[1]) || fastContains(bytes, tagsStartPos, i, standardBytes[0]));
                         handleLine(traceId, isWrongSpan, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
@@ -397,7 +396,7 @@ public class ClientDataStreamHandler implements Runnable {
         }
 
         /**
-         * 性能瓶颈，但是显然不知道怎么优化
+         * 处理一个block中的连续行
          */
         private static void handleLine(String traceId, boolean isTrueSpan, int startPos,
                                        int endPos) {
@@ -419,11 +418,6 @@ public class ClientDataStreamHandler implements Runnable {
 
         /**
          * <p>处理块与块之间交界处的合并行</p>
-         *
-         * @param line
-         * @param traceIdBuilder
-         * @param tagsBuilder
-         * @param firstPartLineEndPos
          */
         public static void handleLine(String line, StringBuilder traceIdBuilder, StringBuilder tagsBuilder, int firstPartLineEndPos) {
             char[] lineChars = line.toCharArray();

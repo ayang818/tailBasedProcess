@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import static com.ayang818.middleware.tailbase.client.DataStorage.UPDATE_THREAD;
+
 /**
  * @author 杨丰畅
  * @description client 端 websocket 信息处理器
@@ -51,7 +53,7 @@ public class TextFrameHandler {
                     // json格式 { "type": Constants.TRACE_DETAIL "data": [ {"data": %s, "dataPos": %d} ] }
                     String msg = String.format("{\"type\": %d, \"data\": %s}",
                             Constants.TRACE_DETAIL, JSON.toJSONString(data));
-                    ClientDataStreamHandler.websocket.sendTextFrame(msg);
+                    UPDATE_THREAD.execute(() -> ClientDataStreamHandler.websocket.sendTextFrame(msg));
                     ClientDataStreamHandler.sum += (System.nanoTime() - start);
                     ClientDataStreamHandler.time++;
                     logger.info("total cost={}ns, avg={}ns", ClientDataStreamHandler.sum, ClientDataStreamHandler.sum / ClientDataStreamHandler.time);
