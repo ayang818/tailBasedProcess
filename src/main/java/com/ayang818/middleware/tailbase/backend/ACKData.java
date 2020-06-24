@@ -2,9 +2,9 @@ package com.ayang818.middleware.tailbase.backend;
 
 import com.ayang818.middleware.tailbase.Constants;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ACKData {
     private AtomicInteger remainAccessTime = new AtomicInteger(Constants.TARGET_PROCESS_COUNT);
 
-    private ConcurrentHashMap<String, List<String>> ackMap = new ConcurrentHashMap<>(32);
+    private Map<String, List<String>> ackMap = new HashMap<>(32);
 
     public int putAll(Map<String, List<String>> map) {
         String traceId;

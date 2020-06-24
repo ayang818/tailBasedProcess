@@ -38,21 +38,21 @@ public class ClientDataStreamHandler implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(ClientDataStreamHandler.class);
     public static WebSocket websocket;
     // 行号
-    private static volatile long lineCount = 0;
+    private static long lineCount = 0;
     // 大桶的 pos 不取余，每 Constants.UPDATE_INTERVAL 行，切换大桶
-    private static volatile int pos = 0;
+    private static int pos = 0;
     // 小桶的 pos ，不需要取余, MAX < Constants.CLIENT_SMALL_BUCKET_SIZE,
     // 每读 Constants.SWITCH_SMALL_BUCKET_INTERVAL 行，切换小桶
-    private static volatile int innerPos = 0;
+    private static int innerPos = 0;
     // pos % BIG_BUCKET_COUNT
-    private static volatile int bigBucketPos = 0;
-    private static volatile BigBucket bigBucket;
-    private static volatile TraceIndexBucket traceIndexBucket;
-    private static volatile List<byte[]> dataBucket;
+    private static int bigBucketPos = 0;
+    private static BigBucket bigBucket;
+    private static TraceIndexBucket traceIndexBucket;
+    private static List<byte[]> dataBucket;
     // 一个工作周期中记录所有errTraceId
-    private static volatile Set<String> errTraceIdSet;
+    private static Set<String> errTraceIdSet;
     // 上一个block最后一条不完整数据的起点（不包含|）
-    private static volatile int lastPartLineStartPos;
+    private static int lastPartLineStartPos;
     private static boolean isFin = false;
 
     private static final StringBuilder lineBuilder = new StringBuilder();
@@ -64,15 +64,9 @@ public class ClientDataStreamHandler implements Runnable {
             BUCKET_TRACE_LIST.add(bigBucket);
             DATA_LIST.add(new ArrayList<>(10));
         }
-        HANDLER_THREAD_POOL = new ThreadPoolExecutor(1, 1, 30,
+        UPDATE_THREAD = new ThreadPoolExecutor(1, 1, 60,
                 TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(),
-                new DefaultThreadFactory("line-handler"),
-                new ThreadPoolExecutor.AbortPolicy());
-
-        UPDATE_THREAD = new ThreadPoolExecutor(2, 2, 60,
-                TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(1000), new DefaultThreadFactory("update_thread"));
+                new ArrayBlockingQueue<>(1000), new DefaultThreadFactory("update-thread"));
     }
 
     public static void start() {
@@ -97,7 +91,6 @@ public class ClientDataStreamHandler implements Runnable {
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
             InputStream input = httpConnection.getInputStream();
             ReadableByteChannel channel = Channels.newChannel(input);
-
             ByteBuffer byteBuffer = ByteBuffer.allocate(Constants.INPUT_BUFFER_SIZE);
 
             bigBucket = BUCKET_TRACE_LIST.get(bigBucketPos);
@@ -179,6 +172,7 @@ public class ClientDataStreamHandler implements Runnable {
 
         Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
 
+        // TODO: 对于不存在的bucket也需要做回复
         // these traceId data should be collect
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap, true);
         getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap, false);
@@ -223,7 +217,10 @@ public class ClientDataStreamHandler implements Runnable {
                             tmpBlock = tmpDataBucket.get(tmpBlockOffset);
                             // 说明在同一个block中，不需要跨block寻找
                             if (tmpStartPos <= tmpEndPos) {
-                                spans = wrongTraceMap.computeIfAbsent(traceId, k -> new ArrayList<>());
+                                if ((spans = wrongTraceMap.get(traceId)) == null) {
+                                    spans = new ArrayList<>(20);
+                                    wrongTraceMap.put(traceId, spans);
+                                }
                                 spans.add(new String(tmpBlock, tmpStartPos, tmpEndPos - tmpStartPos));
                             } else {
                                 // 先收集本block中的内容
@@ -241,7 +238,10 @@ public class ClientDataStreamHandler implements Runnable {
                                     secondPart = new String(nextBlock, 0, tmpEndPos);
                                 }
                                 addedSpan = firstPart + secondPart;
-                                spans = wrongTraceMap.computeIfAbsent(traceId, k -> new ArrayList<>());
+                                if ((spans = wrongTraceMap.get(traceId)) == null) {
+                                    spans = new ArrayList<>(20);
+                                    wrongTraceMap.put(traceId, spans);
+                                }
                                 spans.add(addedSpan);
                             }
                         }
@@ -336,12 +336,7 @@ public class ClientDataStreamHandler implements Runnable {
                     lineCount += 1;
                     Icount = 0;
                     // 结合前一块最后部分，形成完整的一行，按照字符处理
-                    if (isFirstLine) {
-                        String linePart = new String(bytes, lineStartPos, lineEndPos - lineStartPos);
-                        lineBuilder.append(linePart);
-                        handleLine(lineBuilder.toString(), traceIdBuilder, tagsBuilder, lineEndPos);
-                        isFirstLine = false;
-                    } else {
+                    if (!isFirstLine) {
                         // 用于处理连续行
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
 
@@ -353,6 +348,11 @@ public class ClientDataStreamHandler implements Runnable {
                         handleLine(traceId, isWrongSpan, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
+                    } else {
+                        String linePart = new String(bytes, lineStartPos, lineEndPos - lineStartPos);
+                        lineBuilder.append(linePart);
+                        handleLine(lineBuilder.toString(), traceIdBuilder, tagsBuilder, lineEndPos);
+                        isFirstLine = false;
                     }
 
                     // 先切换大桶，再切小桶
@@ -385,7 +385,6 @@ public class ClientDataStreamHandler implements Runnable {
                             logger.warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
                         }
                     }
-
                 }
             }
             // 将最后一部分不完整行导入lineBuilder
@@ -405,7 +404,7 @@ public class ClientDataStreamHandler implements Runnable {
             // List<int[]> spanList = traceIndexBucket.computeIfAbsent(traceId);
             List<int[]> spanList;
             if ((spanList = traceIndexBucket.get(traceId)) == null) {
-                spanList = new ArrayList<>();
+                spanList = new ArrayList<>(20);
                 traceIndexBucket.put(traceId, spanList);
             }
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
@@ -449,7 +448,11 @@ public class ClientDataStreamHandler implements Runnable {
             String traceId = traceIdBuilder.toString();
             String tags = tagsBuilder.toString();
 
-            List<int[]> tmpIndexList = traceIndexBucket.computeIfAbsent(traceId);
+            List<int[]> tmpIndexList;
+            if ((tmpIndexList = traceIndexBucket.get(traceId)) == null) {
+                tmpIndexList = new ArrayList<>();
+                traceIndexBucket.put(traceId, tmpIndexList);
+            }
             // 发送上一个block的位置
             int prePos;
             if (dataBucket.size() - 2 < 0) {

@@ -35,6 +35,7 @@ public class TextFrameHandler {
 
                 @Override
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
+                    long start = System.nanoTime();
                     // backend向client拉取信息
                     Caller caller = JSON.parseObject(payload, new TypeReference<Caller>(){});
                     Set<String> errTraceIdSet;
@@ -51,6 +52,9 @@ public class TextFrameHandler {
                     String msg = String.format("{\"type\": %d, \"data\": %s}",
                             Constants.TRACE_DETAIL, JSON.toJSONString(data));
                     ClientDataStreamHandler.websocket.sendTextFrame(msg);
+                    ClientDataStreamHandler.sum += (System.nanoTime() - start);
+                    ClientDataStreamHandler.time++;
+                    logger.info("total cost={}ns, avg={}ns", ClientDataStreamHandler.sum, ClientDataStreamHandler.sum / ClientDataStreamHandler.time);
                 }
 
                 @Override

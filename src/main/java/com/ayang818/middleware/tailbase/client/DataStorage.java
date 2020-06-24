@@ -25,7 +25,5 @@ public class DataStorage {
 
     public static ExecutorService UPDATE_THREAD;
 
-    public static ExecutorService HANDLER_THREAD_POOL;
-
     public static final Queue<String> updateDataQueue = new LinkedBlockingQueue<>();
 }

@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -51,10 +50,6 @@ public class TraceIndexBucket {
 
     public void quit() {
         this.isWorking.compareAndSet(true, false);
-    }
-
-    public List<int[]> computeIfAbsent(String traceId) {
-        return indexes.computeIfAbsent(traceId, k -> new ArrayList<>());
     }
 
     public void clear() {

@@ -175,18 +175,18 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     public void setWrongTraceId(Set<String> badTraceIdSet, int pos) {
         int bucketPos = pos % BACKEND_BUCKET_COUNT;
         TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(bucketPos);
-        if (traceIdBucket.getPos() != -1 && traceIdBucket.getPos() != pos) {
+        int curPos = traceIdBucket.getPos();
+        if (curPos != -1 && curPos != pos) {
             logger.warn("覆盖了 {} 位置的正在工作的 bucket!!!", bucketPos);
         }
-        if (badTraceIdSet != null && badTraceIdSet.size() > 0) {
-            traceIdBucket.setPos(pos);
-            int processCount = traceIdBucket.addProcessCount();
-            traceIdBucket.getTraceIdSet().addAll(badTraceIdSet);
-            // logger.info(String.format("pos %d 位置的 bucket 访问次数到达 %d", pos, processCount));
-            // 使用阻塞队列优化，如果processCount >= TARGET_PROCESS_COUNT，那么推入消费队列，等待消费
-            if (processCount >= TARGET_PROCESS_COUNT) {
-                PullDataService.blockingQueue.offer(traceIdBucket);
-            }
+        // 不管这一区间是否有错误链路，都需要添加
+        traceIdBucket.setPos(pos);
+        int processCount = traceIdBucket.addProcessCount();
+        traceIdBucket.getTraceIdSet().addAll(badTraceIdSet);
+        // logger.info(String.format("pos %d 位置的 bucket 访问次数到达 %d", pos, processCount));
+        // 使用阻塞队列优化，如果processCount >= TARGET_PROCESS_COUNT，那么推入消费队列，等待消费
+        if (processCount >= TARGET_PROCESS_COUNT) {
+            PullDataService.blockingQueue.offer(traceIdBucket);
         }
     }
 

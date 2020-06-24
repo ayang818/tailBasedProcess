@@ -28,7 +28,7 @@ public class WSStarter {
     public static MessageHandler messageHandler;
 
     public void run() {
-        EventLoopGroup bossGroup = new NioEventLoopGroup();
+        EventLoopGroup bossGroup = new NioEventLoopGroup(2);
         EventLoopGroup workerGroup = new NioEventLoopGroup(4);
 
         ServerBootstrap server = new ServerBootstrap();

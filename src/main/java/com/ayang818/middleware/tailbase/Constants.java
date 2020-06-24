@@ -16,7 +16,7 @@ public class Constants {
     // client下bigBucket的数量
     public static final int CLIENT_BIG_BUCKET_COUNT = 50;
     // client下一个bigBucket中smallBucket的数量
-    public static final int CLIENT_SMALL_BUCKET_COUNT = 100;
+    public static final int CLIENT_SMALL_BUCKET_COUNT = 20;
     // 每读这么多行，切换小桶
     public static final int SWITCH_SMALL_BUCKET_INTERVAL = UPDATE_INTERVAL / CLIENT_SMALL_BUCKET_COUNT;
     // 保守估计每个traceId下只有2条数据
