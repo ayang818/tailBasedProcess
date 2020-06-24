@@ -1,7 +1,6 @@
 package com.ayang818.middleware.tailbase.client;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
 import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.common.Caller;
@@ -16,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-import static com.ayang818.middleware.tailbase.client.DataStorage.UPDATE_THREAD;
+import static com.ayang818.middleware.tailbase.client.DataStorage.DETAIL_THREAD;
 
 /**
  * @author 杨丰畅
@@ -26,6 +25,8 @@ import static com.ayang818.middleware.tailbase.client.DataStorage.UPDATE_THREAD;
 public class TextFrameHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(TextFrameHandler.class);
+
+    private static final StringBuilder msgBuilder = new StringBuilder(750000);
 
     public static WebSocketUpgradeHandler wsHandler = new WebSocketUpgradeHandler.Builder()
             .addWebSocketListener(new WebSocketListener() {
@@ -37,26 +38,32 @@ public class TextFrameHandler {
 
                 @Override
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
-                    long start = System.nanoTime();
-                    // backend向client拉取信息
-                    Caller caller = JSON.parseObject(payload, new TypeReference<Caller>(){});
+                    // backend向client拉取具体信息
+                    Caller caller = JSON.parseObject(payload, new TypeReference<Caller>() {
+                    });
                     Set<String> errTraceIdSet;
                     int pos;
                     List<Caller.PullDataBucket> pullDataBucketList = caller.getData();
                     List<Resp> data = new ArrayList<>();
-                    for (Caller.PullDataBucket pullDataBucket : pullDataBucketList) {
+                    int len = pullDataBucketList.size();
+                    for (int i = 0; i < len; i++) {
+                        Caller.PullDataBucket pullDataBucket = pullDataBucketList.get(i);
                         errTraceIdSet = pullDataBucket.getErrTraceIdSet();
                         pos = pullDataBucket.getPos();
                         ClientDataStreamHandler.getWrongTracing(errTraceIdSet,
-                                        pos, data);
+                                pos, data);
                     }
                     // json格式 { "type": Constants.TRACE_DETAIL "data": [ {"data": %s, "dataPos": %d} ] }
-                    String msg = String.format("{\"type\": %d, \"data\": %s}",
-                            Constants.TRACE_DETAIL, JSON.toJSONString(data));
-                    UPDATE_THREAD.execute(() -> ClientDataStreamHandler.websocket.sendTextFrame(msg));
-                    ClientDataStreamHandler.sum += (System.nanoTime() - start);
-                    ClientDataStreamHandler.time++;
-                    logger.info("total cost={}ns, avg={}ns", ClientDataStreamHandler.sum, ClientDataStreamHandler.sum / ClientDataStreamHandler.time);
+                    DETAIL_THREAD.execute(() -> {
+                        msgBuilder.append("{\"type\":")
+                                .append(Constants.TRACE_DETAIL)
+                                .append(", \"data\":")
+                                .append(JSON.toJSONString(data))
+                                .append("}");
+                        ClientDataStreamHandler.websocket.sendTextFrame(msgBuilder.toString());
+                        msgBuilder.delete(0, msgBuilder.length());
+                    });
+                    logger.info("收集 pos {} 前的数据结束", pullDataBucketList.get(len - 1).pos);
                 }
 
                 @Override

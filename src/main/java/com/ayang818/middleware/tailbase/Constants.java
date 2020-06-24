@@ -46,4 +46,7 @@ public class Constants {
     public static final String[] standardString = {
             "error=1", "http.status_code", "http.status_code=200"
     };
+
+    public static final String finMsg = "{\"type\": 2}";
+
 }

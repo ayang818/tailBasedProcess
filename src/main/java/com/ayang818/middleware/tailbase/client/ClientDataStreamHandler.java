@@ -24,6 +24,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import static com.ayang818.middleware.tailbase.Constants.finMsg;
 import static com.ayang818.middleware.tailbase.Constants.standardBytes;
 import static com.ayang818.middleware.tailbase.client.DataStorage.*;
 
@@ -37,24 +38,26 @@ public class ClientDataStreamHandler implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(ClientDataStreamHandler.class);
     public static WebSocket websocket;
     // 行号
-    private static long lineCount = 0;
+    private static volatile long lineCount = 0;
     // 大桶的 pos 不取余，每 Constants.UPDATE_INTERVAL 行，切换大桶
-    private static int pos = 0;
+    private static volatile int pos = 0;
     // 小桶的 pos ，不需要取余, MAX < Constants.CLIENT_SMALL_BUCKET_SIZE,
     // 每读 Constants.SWITCH_SMALL_BUCKET_INTERVAL 行，切换小桶
-    private static int innerPos = 0;
+    private static volatile int innerPos = 0;
     // pos % BIG_BUCKET_COUNT
-    private static int bigBucketPos = 0;
-    private static BigBucket bigBucket;
-    private static TraceIndexBucket traceIndexBucket;
-    private static List<byte[]> dataBucket;
+    private static volatile int bigBucketPos = 0;
+    private static volatile BigBucket bigBucket;
+    private static volatile TraceIndexBucket traceIndexBucket;
+    private static volatile List<byte[]> dataBucket;
     // 一个工作周期中记录所有errTraceId
     private static Set<String> errTraceIdSet;
     // 上一个block最后一条不完整数据的起点（不包含|）
-    private static int lastPartLineStartPos;
+    private static volatile int lastPartLineStartPos;
     private static boolean isFin = false;
 
-    private static final StringBuilder lineBuilder = new StringBuilder();
+    private static final StringBuilder lineBuilder = new StringBuilder(200);
+    private static final StringBuilder msgBuilder = new StringBuilder(300);
+    private static final StringBuilder updateMsgBuilder = new StringBuilder(2000);
 
     public static void init() {
         for (int i = 0; i < Constants.CLIENT_BIG_BUCKET_COUNT; i++) {
@@ -63,9 +66,6 @@ public class ClientDataStreamHandler implements Runnable {
             BUCKET_TRACE_LIST.add(bigBucket);
             DATA_LIST.add(new ArrayList<>(10));
         }
-        UPDATE_THREAD = new ThreadPoolExecutor(1, 1, 60,
-                TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(1000), new DefaultThreadFactory("update-thread"));
     }
 
     public static void start() {
@@ -131,21 +131,23 @@ public class ClientDataStreamHandler implements Runnable {
     private static void updateWrongTraceId() {
         String json = JSON.toJSONString(errTraceIdSet);
         // send badTraceIdList and its pos to the backend
-        String msg = String.format("{\"badTraceIdSet\": %s, \"pos\": %d}"
-                , json, pos);
-        updateDataQueue.offer(msg);
+        msgBuilder.append("{\"badTraceIdSet\": ")
+                .append(json)
+                .append(", \"pos\":").append(pos).append("}");
+        updateDataQueue.offer(msgBuilder.toString());
+        msgBuilder.delete(0, msgBuilder.length());
 
         if (updateDataQueue.size() >= 10 || isFin) {
-            StringBuilder res = new StringBuilder();
-            res.append("{");
-            res.append(String.format("\"type\": %d,", Constants.UPDATE_TYPE)).append("\"data\": [");
-            while (updateDataQueue.size() > 0) {
-                String tmp = updateDataQueue.poll();
-                res.append("'").append(tmp).append("'").append(",");
-            }
-            res.append("]");
-            res.append("}");
-            UPDATE_THREAD.execute(() -> websocket.sendTextFrame(res.toString()));
+            UPDATE_THREAD.execute(() -> {
+                updateMsgBuilder.append("{\"type\":").append(Constants.UPDATE_TYPE).append(", \"data\": [");
+                while (updateDataQueue.size() > 0) {
+                    String tmp = updateDataQueue.poll();
+                    updateMsgBuilder.append("'").append(tmp).append("',");
+                }
+                updateMsgBuilder.append("]}");
+                websocket.sendTextFrame(updateMsgBuilder.toString());
+                updateMsgBuilder.delete(0, updateMsgBuilder.length());
+            });
             logger.info("成功上报pos {} 前的wrongTraceId...", pos);
         }
         // auto clear after update
@@ -165,9 +167,9 @@ public class ClientDataStreamHandler implements Runnable {
         int curr = pos % bucketCount;
         int prev = (curr - 1 == -1) ? bucketCount - 1 : (curr - 1) % bucketCount;
         int next = (curr + 1 == bucketCount) ? 0 : (curr + 1) % bucketCount;
-
-        logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
-                "bucket中的数据", pos, curr, prev, next));
+        if (prev == -2) logger.error("{}", pos);
+        // logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
+        //         "bucket中的数据", pos, curr, prev, next));
 
         Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
 
@@ -258,7 +260,9 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     private void callFinish() {
-        UPDATE_THREAD.execute(() -> websocket.sendTextFrame(String.format("{\"type\": %d}", Constants.FIN_TYPE)));
+        UPDATE_THREAD.execute(() -> {
+            websocket.sendTextFrame(finMsg);
+        });
         logger.info("已发送 FIN 请求");
     }
 
@@ -310,7 +314,7 @@ public class ClientDataStreamHandler implements Runnable {
             int Icount = 0;
             boolean isFirstLine = true;
             StringBuilder traceIdBuilder = new StringBuilder();
-            StringBuilder tagsBuilder = new StringBuilder();
+            StringBuilder tagsBuilder = new StringBuilder(150);
             byte spl = 124; // |
             byte lf = 10;   // \n
             byte bt;

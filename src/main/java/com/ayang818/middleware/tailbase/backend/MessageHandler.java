@@ -143,19 +143,6 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     }
 
     /**
-     * 向client发送拉取数据的请求
-     *
-     * @param traceIdListString
-     * @param pos
-     */
-    public static void pullWrongTraceDetails(String traceIdListString, int pos) {
-        String msg = String.format("{\"type\": %d, \"traceIdSet\": %s, \"pos\": %d}",
-                Constants.PULL_TRACE_DETAIL_TYPE, traceIdListString, pos);
-        channels.writeAndFlush(new TextWebSocketFrame(msg));
-        logger.info("发送拉取 {} pos处 bucket data请求.....", pos);
-    }
-
-    /**
      * 批量拉取数据
      * @param traceIdBucketList
      */

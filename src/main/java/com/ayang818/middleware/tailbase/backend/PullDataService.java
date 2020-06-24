@@ -90,8 +90,7 @@ public class PullDataService implements Runnable {
             String result = JSON.toJSONString(resMap);
             RequestBody body = new FormBody.Builder()
                     .add("result", result).build();
-            String url = String.format("http://localhost:%s/api/finished",
-                    BasicHttpHandler.getDataSourcePort());
+            String url = "http://localhost:"+ BasicHttpHandler.getDataSourcePort() +"/api/finished";
             Request request = new Request.Builder().url(url).post(body).build();
             Response response = BaseUtils.callHttp(request);
             if (response.isSuccessful()) {
