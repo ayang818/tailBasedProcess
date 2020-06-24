@@ -136,7 +136,7 @@ public class ClientDataStreamHandler implements Runnable {
                 , json, pos);
         updateDataQueue.offer(msg);
 
-        if (updateDataQueue.size() >= 15 || isFin) {
+        if (updateDataQueue.size() >= 10 || isFin) {
             StringBuilder res = new StringBuilder();
             res.append("{");
             res.append(String.format("\"type\": %d,", Constants.UPDATE_TYPE)).append("\"data\": [");
