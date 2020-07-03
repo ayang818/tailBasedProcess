@@ -26,6 +26,10 @@ public class TraceIdBucket {
         this.pos.set(pos);
     }
 
+    public int getProcessCount() {
+        return processCount.get();
+    }
+
     public Set<String> getTraceIdSet() {
         return traceIdSet;
     }

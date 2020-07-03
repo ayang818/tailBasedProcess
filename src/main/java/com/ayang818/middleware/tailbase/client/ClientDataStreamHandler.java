@@ -133,7 +133,7 @@ public class ClientDataStreamHandler implements Runnable {
         updateDataQueue.offer(msgBuilder.toString());
         msgBuilder.delete(0, msgBuilder.length());
 
-        if (updateDataQueue.size() >= 10 || isFin) {
+        if (updateDataQueue.size() >= 20 || isFin) {
             updateMsgBuilder.append("{\"type\":").append(Constants.UPDATE_TYPE).append(", \"data\": [");
             while (updateDataQueue.size() > 0) {
                 String tmp = updateDataQueue.poll();

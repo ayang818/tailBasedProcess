@@ -3,6 +3,7 @@ package com.ayang818.middleware.tailbase.backend;
 import com.ayang818.middleware.tailbase.Constants;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
+import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -28,8 +29,8 @@ public class WSStarter {
     public static MessageHandler messageHandler;
 
     public void run() {
-        EventLoopGroup bossGroup = new NioEventLoopGroup(2);
-        EventLoopGroup workerGroup = new NioEventLoopGroup(4);
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup(1);
 
         ServerBootstrap server = new ServerBootstrap();
         server.group(bossGroup, workerGroup)

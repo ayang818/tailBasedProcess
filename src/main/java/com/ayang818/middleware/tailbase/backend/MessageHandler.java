@@ -40,24 +40,24 @@ import static com.ayang818.middleware.tailbase.backend.PullDataService.resMap;
 public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
     private static final Logger logger = LoggerFactory.getLogger(MessageHandler.class);
     private static final ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-    // calc checksum res thread
-    private static final ExecutorService reportThreadPool = Executors.newFixedThreadPool(1,
-            new DefaultThreadFactory("report-checkSum"));
     // FIN_TIME will add one
     private static final AtomicInteger FIN_TIME = new AtomicInteger(0);
     // waiting to consume bucket list
     private static final List<TraceIdBucket> TRACEID_BUCKET_LIST = new ArrayList<>(BACKEND_BUCKET_COUNT);
     // waiting client's ack data; key is pos, value is data
     private static final Map<String, ACKData> ACK_MAP = new ConcurrentHashMap<>(200);
+    // consume thread
+    private static final ExecutorService consumeThread = Executors.newSingleThreadExecutor(new DefaultThreadFactory("consume-thread"));
+    private static final ExecutorService updateThread = Executors.newSingleThreadExecutor(new DefaultThreadFactory("update-thread"));
     // lock list
-    private static final Object[] LOCK_LIST = new Object[BACKEND_BUCKET_COUNT];
+    private static volatile int consumePos = 0;
+    private static volatile int updatePos = 0;
     // use for md5 calc
     private static final char[] HEX_DIGITS = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
     public static void init() {
         for (int i = 0; i < BACKEND_BUCKET_COUNT; i++) {
             TRACEID_BUCKET_LIST.add(new TraceIdBucket());
-            LOCK_LIST[i] = new Object();
         }
     }
 
@@ -69,24 +69,30 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
 
         switch (type) {
             case Constants.UPDATE_TYPE:
-                List<String> data = jsonObject.getObject("data", new TypeReference<List<String>>(){});
-                Set<String> badTraceIdSet;
-                int pos;
-                for (String updateDto : data) {
-                    JSONObject tmp = JSON.parseObject(updateDto);
-                    badTraceIdSet = tmp.getObject("badTraceIdSet", new TypeReference<Set<String>>(){});
-                    pos = tmp.getObject("pos", Integer.class);
-                    setWrongTraceId(badTraceIdSet, pos);
-                }
+                updateThread.execute(() -> {
+                    List<String> data = jsonObject.getObject("data", new TypeReference<List<String>>() {
+                    });
+                    Set<String> badTraceIdSet;
+                    int pos;
+                    for (String updateDto : data) {
+                        JSONObject tmp = JSON.parseObject(updateDto);
+                        badTraceIdSet = tmp.getObject("badTraceIdSet", new TypeReference<Set<String>>() {
+                        });
+                        pos = tmp.getObject("pos", Integer.class);
+                        setWrongTraceId(badTraceIdSet, pos);
+                    }
+                });
                 break;
             case Constants.TRACE_DETAIL:
-                List<Resp> respDetails = jsonObject.getObject("data",
-                        new TypeReference<List<Resp>>() {
-                        });
-                for (Resp resp : respDetails) {
-                    // pull data from this pos, here is for a recent ack!
-                    consumeTraceDetails(resp.getData(), resp.getDataPos());
-                }
+                consumeThread.execute(() -> {
+                    List<Resp> respDetails = jsonObject.getObject("data",
+                            new TypeReference<List<Resp>>() {
+                            });
+                    for (Resp resp : respDetails) {
+                        // pull data from this pos, here is for a recent ack!
+                        consumeTraceDetails(resp.getData(), resp.getDataPos());
+                    }
+                });
                 break;
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
@@ -106,44 +112,38 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     private void consumeTraceDetails(Map<String, List<String>> detailMap, int pos) {
         String posStr = String.valueOf(pos);
         ACKData ackData;
-        int remainAccessTime;
-
+        int remainAccessTime = -1;
         // 以免重复检测到未放入，导致脏读（一组锁，减少竞争）
-        synchronized (LOCK_LIST[pos % BACKEND_BUCKET_COUNT]) {
-            if (ACK_MAP.containsKey(posStr)) {
-                ackData = ACK_MAP.get(posStr);
-            } else {
-                ackData = new ACKData();
-                ACK_MAP.put(posStr, ackData);
-            }
-            remainAccessTime = ackData.putAll(detailMap);
-        }
+        int p = pos % BACKEND_BUCKET_COUNT;
+        ackData = ACK_MAP.computeIfAbsent(posStr, (v) -> new ACKData());
+        remainAccessTime = ackData.putAll(detailMap);
 
         if (remainAccessTime == 0) {
-            reportThreadPool.execute(() -> {
-                Map<String, List<String>> ackMap = ackData.getAckMap();
-                // 这里的key为string，计算md5
-                Iterator<Map.Entry<String, List<String>>> it = ackMap.entrySet().iterator();
-                Map.Entry<String, List<String>> entry;
-                while (it.hasNext()) {
-                    entry = it.next();
-                    String spans = entry.getValue()
-                            .stream()
-                            .sorted(Comparator.comparing(MessageHandler::getStartTime))
-                            .collect(Collectors.joining("\n"));
-                    spans += "\n";
-                    resMap.put(entry.getKey(), md5(spans));
-                }
-                // 此时才可以还原 bucketPos 所在 bucket 为初始状态，因为这个时候才刚好处理完这个bucket
-                TRACEID_BUCKET_LIST.get(pos % BACKEND_BUCKET_COUNT).reset();
-                ACK_MAP.remove(posStr);
-                // *info("{} 处的bucket消费完毕，清空此处的 bucket; 当前检测到 {} 条错误链路", pos, resMap.size());
-            });
+            Map<String, List<String>> ackMap = ackData.getAckMap();
+            // 这里的key为string，计算md5
+            Iterator<Map.Entry<String, List<String>>> it = ackMap.entrySet().iterator();
+            Map.Entry<String, List<String>> entry;
+            while (it.hasNext()) {
+                entry = it.next();
+                String spans = entry.getValue()
+                        .stream()
+                        .sorted(Comparator.comparing(MessageHandler::getStartTime))
+                        .collect(Collectors.joining("\n"));
+                spans += "\n";
+                resMap.put(entry.getKey(), md5(spans));
+            }
+            // 此时才可以还原 bucketPos 所在 bucket 为初始状态，因为这个时候才刚好处理完这个bucket
+            TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(p);
+            traceIdBucket.reset();
+            ACK_MAP.remove(posStr);
+            // *info("{} {} 处的bucket消费完毕，清空此处的 bucket, size {}; 当前检测到 {} 条错误链路", p, pos, traceIdBucket.getTraceIdSet().size(), resMap.size());
         }
+        consumePos = Math.max(consumePos, pos);
     }
 
     /**
      * 批量拉取数据
+     *
      * @param traceIdBucketList
      */
     public static void pullWrongTraceDetails(List<Caller.PullDataBucket> traceIdBucketList) {
@@ -159,12 +159,19 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      * @param badTraceIdSet
      * @param pos
      */
-    public synchronized void setWrongTraceId(Set<String> badTraceIdSet, int pos) {
+    public void setWrongTraceId(Set<String> badTraceIdSet, int pos) {
         int bucketPos = pos % BACKEND_BUCKET_COUNT;
         TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(bucketPos);
         int curPos = traceIdBucket.getPos();
         if (curPos != -1 && curPos != pos) {
-            // *warn("覆盖了 {} 位置的正在工作的 bucket!!!", bucketPos);
+            while (traceIdBucket.getPos() != -1) {
+                try {
+                    Thread.sleep(2);
+                    logger.info("等待 pos {} 被消费, consumePos {}, updatePos {}", pos, consumePos, updatePos);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
         }
         // 不管这一区间是否有错误链路，都需要添加
         traceIdBucket.setPos(pos);
@@ -177,6 +184,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             finalTraceIdBucket.getTraceIdSet().addAll(traceIdBucket.getTraceIdSet());
             PullDataService.blockingQueue.offer(finalTraceIdBucket);
         }
+        updatePos = Math.max(updatePos, pos);
     }
 
     /**
