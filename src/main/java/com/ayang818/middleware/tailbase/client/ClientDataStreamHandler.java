@@ -336,9 +336,9 @@ public class ClientDataStreamHandler implements Runnable {
 
                         // TODO 性能瓶颈，如何判断一个span是否是错误的/正确的, tag avg len is 143
                         boolean isWrongSpan = false;
-                        isWrongSpan = !fastContains(bytes,
-                                tagsStartPos, i, standardBytes[2]) && (fastContains(bytes,
-                                tagsStartPos, i, standardBytes[1]) || fastContains(bytes, tagsStartPos, i, standardBytes[0]));
+                        isWrongSpan = (fastContains(bytes, tagsStartPos, i, standardBytes[1])
+                                && !fastContains(bytes, tagsStartPos, i, standardBytes[2]))
+                                || fastContains(bytes, tagsStartPos, i, standardBytes[0]);
                         handleLine(traceId, isWrongSpan, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
