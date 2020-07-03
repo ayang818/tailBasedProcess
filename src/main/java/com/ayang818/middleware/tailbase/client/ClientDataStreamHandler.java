@@ -106,11 +106,6 @@ public class ClientDataStreamHandler implements Runnable {
                 bytes = new byte[remain];
                 System.arraycopy(((Buffer) byteBuffer).array(), 0, bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
-                // 要是消费的速度比不上更新的速度，延缓更新
-                // while (updatePos.get() - consumedPos.get() >= Constants.CLIENT_BIG_BUCKET_COUNT - 20) {
-                //     // *info("睡觉,等待消费 {} {}", updatePos.get(), consumedPos.get());
-                //     Thread.sleep(20);
-                // }
                 // HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
                 BlockWorker.run(bytes, remain);
             }
