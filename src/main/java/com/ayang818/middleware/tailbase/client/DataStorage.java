@@ -23,10 +23,6 @@ public class DataStorage {
             TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(10), new DefaultThreadFactory("client-main"));
 
-    public static ExecutorService UPDATE_THREAD = new ThreadPoolExecutor(1, 1, 60,
-            TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(1000), new DefaultThreadFactory("update-thread"));
-
     public static ExecutorService DETAIL_THREAD = new ThreadPoolExecutor(1, 1, 60,
             TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(400), new DefaultThreadFactory("detail-thread"));

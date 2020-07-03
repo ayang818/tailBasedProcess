@@ -40,10 +40,10 @@ public class BasicHttpHandler extends SimpleChannelInboundHandler<FullHttpReques
     private void handleSetParameter(ChannelHandlerContext ctx, String url, String requestMethod) {
         if (url.contains("port")) {
             port = url.substring(url.indexOf("=") + 1);
-            logger.info(port);
-            logger.info("set port {}", port);
+            // *info(port);
+            // *info("set port {}", port);
         } else {
-            logger.info("can not get port");
+            // *info("can not get port");
         }
         if (BaseUtils.isClientProcess()) {
             // start to handle data Stream
@@ -66,6 +66,6 @@ public class BasicHttpHandler extends SimpleChannelInboundHandler<FullHttpReques
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         super.exceptionCaught(ctx, cause);
         ctx.close();
-        logger.info("{}", cause.getMessage());
+        // *info("{}", cause.getMessage());
     }
 }

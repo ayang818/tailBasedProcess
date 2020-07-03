@@ -6,7 +6,6 @@ import com.ayang818.middleware.tailbase.Constants;
 import com.ayang818.middleware.tailbase.common.Resp;
 import com.ayang818.middleware.tailbase.utils.WsClient;
 import com.google.common.collect.Sets;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import org.asynchttpclient.ws.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,9 +19,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import static com.ayang818.middleware.tailbase.Constants.finMsg;
 import static com.ayang818.middleware.tailbase.Constants.standardBytes;
@@ -80,11 +76,11 @@ public class ClientDataStreamHandler implements Runnable {
             String path = getPath();
             // process data on client, not server
             if (path == null || "".equals(path)) {
-                logger.warn("path is empty");
+                // *warn("path is empty");
                 return;
             }
             URL url = new URL(path);
-            logger.info("data path:" + path);
+            // *info("data path:" + path);
             // fetch the data source
             HttpURLConnection httpConnection =
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
@@ -118,9 +114,9 @@ public class ClientDataStreamHandler implements Runnable {
             traceIndexBucket.quit();
             callFinish();
             input.close();
-            logger.info("finish");
+            // *info("finish");
         } catch (Exception e) {
-            logger.warn("拉取数据流的过程中产生错误！", e);
+            // *warn("拉取数据流的过程中产生错误！", e);
         }
 
     }
@@ -138,17 +134,15 @@ public class ClientDataStreamHandler implements Runnable {
         msgBuilder.delete(0, msgBuilder.length());
 
         if (updateDataQueue.size() >= 10 || isFin) {
-            UPDATE_THREAD.execute(() -> {
-                updateMsgBuilder.append("{\"type\":").append(Constants.UPDATE_TYPE).append(", \"data\": [");
-                while (updateDataQueue.size() > 0) {
-                    String tmp = updateDataQueue.poll();
-                    updateMsgBuilder.append("'").append(tmp).append("',");
-                }
-                updateMsgBuilder.append("]}");
-                websocket.sendTextFrame(updateMsgBuilder.toString());
-                updateMsgBuilder.delete(0, updateMsgBuilder.length());
-            });
-            logger.info("成功上报pos {} 前的wrongTraceId...", pos);
+            updateMsgBuilder.append("{\"type\":").append(Constants.UPDATE_TYPE).append(", \"data\": [");
+            while (updateDataQueue.size() > 0) {
+                String tmp = updateDataQueue.poll();
+                updateMsgBuilder.append("'").append(tmp).append("',");
+            }
+            updateMsgBuilder.append("]}");
+            websocket.sendTextFrame(updateMsgBuilder.toString());
+            updateMsgBuilder.delete(0, updateMsgBuilder.length());
+            // *info("成功上报pos {} 前的wrongTraceId...", pos);
         }
         // auto clear after update
         errTraceIdSet.clear();
@@ -167,8 +161,7 @@ public class ClientDataStreamHandler implements Runnable {
         int curr = pos % bucketCount;
         int prev = (curr - 1 == -1) ? bucketCount - 1 : (curr - 1) % bucketCount;
         int next = (curr + 1 == bucketCount) ? 0 : (curr + 1) % bucketCount;
-        if (prev == -2) logger.error("{}", pos);
-        // logger.info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
+        // // *info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
         //         "bucket中的数据", pos, curr, prev, next));
 
         Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
@@ -179,7 +172,7 @@ public class ClientDataStreamHandler implements Runnable {
         getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap, false);
         getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap, false);
 
-        // logger.info(res);
+        // // *info(res);
         res.add(new Resp(pos, wrongTraceMap));
     }
 
@@ -260,10 +253,8 @@ public class ClientDataStreamHandler implements Runnable {
     }
 
     private void callFinish() {
-        UPDATE_THREAD.execute(() -> {
-            websocket.sendTextFrame(finMsg);
-        });
-        logger.info("已发送 FIN 请求");
+        websocket.sendTextFrame(finMsg);
+        // *info("已发送 FIN 请求");
     }
 
     private String getPath() {
@@ -290,6 +281,7 @@ public class ClientDataStreamHandler implements Runnable {
 
     static long sum = 0;
     static long time = 0;
+
     /**
      * 处理读取出来的一块数据，作为一个worker直接执行
      */
@@ -385,7 +377,7 @@ public class ClientDataStreamHandler implements Runnable {
                         if (!traceIndexBucket.tryEnter()) {
                             traceIndexBucket.clear();
                             traceIndexBucket.forceEnter();
-                            logger.warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
+                            // *warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
                         }
                     }
                 }
@@ -412,7 +404,7 @@ public class ClientDataStreamHandler implements Runnable {
             }
             // 索引内容包含 1.bucket内部所在byte[]的dataOffset 2. startPos 3. endPos (含左不含右)
             // if startPos > endPos, 说明此行跨block
-            if (dataBucket.size() == 0) return ;
+            if (dataBucket.size() == 0) return;
             spanList.add(new int[]{dataBucket.size() - 1, startPos, endPos});
 
             if (isTrueSpan) {
@@ -457,8 +449,8 @@ public class ClientDataStreamHandler implements Runnable {
                 int preBucketPos = (bigBucketPos - 1) < 0 ? Constants.CLIENT_BIG_BUCKET_COUNT - 1 : bigBucketPos % Constants.CLIENT_BIG_BUCKET_COUNT;
                 prePos = DATA_LIST.get(preBucketPos).size() - 1;
                 if (prePos < 0) {
-                    logger.warn("preBucketPos {} 已经被清除...", preBucketPos);
-                    return ;
+                    // *warn("preBucketPos {} 已经被清除...", preBucketPos);
+                    return;
                 }
             } else {
                 prePos = dataBucket.size() - 2;
@@ -523,13 +515,13 @@ public class ClientDataStreamHandler implements Runnable {
             for (int i = 0; i <= max; i++) {
                 // Look for first character.
                 if (value[i + start] != first) {
-                    while (++i <= max && value[i + start] != first);
+                    while (++i <= max && value[i + start] != first) ;
                 }
                 // Found first character, now look at the rest of value
                 if (i <= max) {
                     int j = i + 1;
                     int end = j + strCount - 1;
-                    for (int k = 1; j < end && value[j + start] == str[k]; j++, k++);
+                    for (int k = 1; j < end && value[j + start] == str[k]; j++, k++) ;
                     if (j == end) {
                         // Found whole string.
                         return true;

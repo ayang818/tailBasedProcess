@@ -55,6 +55,8 @@ public class WSStarter {
                 });
 
         channelFuture = server.bind(Constants.BACKEND_WEBSOCKET_PORT);
-        channelFuture.addListener((ChannelFutureListener) future -> logger.info("websocket 服务已在 {} 端口启动", Constants.BACKEND_WEBSOCKET_PORT));
+        channelFuture.addListener((ChannelFutureListener) future -> {
+            // *info("websocket 服务已在 {} 端口启动", Constants.BACKEND_WEBSOCKET_PORT);
+        });
     }
 }

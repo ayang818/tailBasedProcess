@@ -90,7 +90,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 break;
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
-                logger.info("收到 {} 次 Fin请求", finTime);
+                // *info("收到 {} 次 Fin请求", finTime);
                 break;
             default:
                 break;
@@ -137,7 +137,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 // 此时才可以还原 bucketPos 所在 bucket 为初始状态，因为这个时候才刚好处理完这个bucket
                 TRACEID_BUCKET_LIST.get(pos % BACKEND_BUCKET_COUNT).reset();
                 ACK_MAP.remove(posStr);
-                logger.info("{} 处的bucket消费完毕，清空此处的 bucket; 当前检测到 {} 条错误链路", pos, resMap.size());
+                // *info("{} 处的bucket消费完毕，清空此处的 bucket; 当前检测到 {} 条错误链路", pos, resMap.size());
             });
         }
     }
@@ -150,7 +150,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         Caller caller = new Caller(Constants.PULL_TRACE_DETAIL_TYPE, traceIdBucketList);
         String msg = JSON.toJSONString(caller);
         channels.writeAndFlush(new TextWebSocketFrame(msg));
-        logger.info("发送拉取bucket data请求.....");
+        // *info("发送拉取bucket data请求.....");
     }
 
     /**
@@ -159,21 +159,23 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
      * @param badTraceIdSet
      * @param pos
      */
-    public void setWrongTraceId(Set<String> badTraceIdSet, int pos) {
+    public synchronized void setWrongTraceId(Set<String> badTraceIdSet, int pos) {
         int bucketPos = pos % BACKEND_BUCKET_COUNT;
         TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(bucketPos);
         int curPos = traceIdBucket.getPos();
         if (curPos != -1 && curPos != pos) {
-            logger.warn("覆盖了 {} 位置的正在工作的 bucket!!!", bucketPos);
+            // *warn("覆盖了 {} 位置的正在工作的 bucket!!!", bucketPos);
         }
         // 不管这一区间是否有错误链路，都需要添加
         traceIdBucket.setPos(pos);
         int processCount = traceIdBucket.addProcessCount();
         traceIdBucket.getTraceIdSet().addAll(badTraceIdSet);
-        // logger.info(String.format("pos %d 位置的 bucket 访问次数到达 %d", pos, processCount));
         // 使用阻塞队列优化，如果processCount >= TARGET_PROCESS_COUNT，那么推入消费队列，等待消费
         if (processCount >= TARGET_PROCESS_COUNT) {
-            PullDataService.blockingQueue.offer(traceIdBucket);
+            TraceIdBucket finalTraceIdBucket = new TraceIdBucket();
+            finalTraceIdBucket.setPos(traceIdBucket.getPos());
+            finalTraceIdBucket.getTraceIdSet().addAll(traceIdBucket.getTraceIdSet());
+            PullDataService.blockingQueue.offer(finalTraceIdBucket);
         }
     }
 
@@ -188,7 +190,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         // bucket中元素是否消费完
         for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
             if (traceIdBucket.getPos() != -1) {
-                logger.info("{} pos处仍在等待", traceIdBucket.getPos());
+                // *info("{} pos处仍在等待", traceIdBucket.getPos());
                 return false;
             }
         }
@@ -219,13 +221,13 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         channels.add(ctx.channel());
-        logger.info("添加一条新的连接，当前总共 {} 条连接......", channels.size());
+        // *info("添加一条新的连接，当前总共 {} 条连接......", channels.size());
     }
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         channels.remove(ctx.channel());
-        logger.info("删除一条连接，当前总共 {} 条连接......", channels.size());
+        // *info("删除一条连接，当前总共 {} 条连接......", channels.size());
     }
 
     public String md5(String key) {

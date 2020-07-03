@@ -33,7 +33,7 @@ public class TextFrameHandler {
                 @Override
                 public void onOpen(WebSocket websocket) {
                     // WebSocket connection opened
-                    logger.info("websocket 连接已建立......");
+                    // *info("websocket 连接已建立......");
                 }
 
                 @Override
@@ -63,19 +63,19 @@ public class TextFrameHandler {
                         ClientDataStreamHandler.websocket.sendTextFrame(msgBuilder.toString());
                         msgBuilder.delete(0, msgBuilder.length());
                     });
-                    logger.info("收集 pos {} 前的数据结束", pullDataBucketList.get(len - 1).pos);
+                    // *info("收集 pos {} 前的数据结束", pullDataBucketList.get(len - 1).pos);
                 }
 
                 @Override
                 public void onClose(WebSocket websocket, int code, String reason) {
                     // WebSocket connection closed
-                    logger.info("websocket 连接已断开......");
+                    // *info("websocket 连接已断开......");
                 }
 
                 @Override
                 public void onError(Throwable t) {
                     // WebSocket connection error
-                    logger.error("websocket 连接发生错误，堆栈信息如下......");
+                    // *error("websocket 连接发生错误，堆栈信息如下......");
                     t.printStackTrace();
                 }
 

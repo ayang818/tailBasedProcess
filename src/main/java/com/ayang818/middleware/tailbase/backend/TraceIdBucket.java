@@ -16,7 +16,7 @@ public class TraceIdBucket {
     private final AtomicInteger pos = new AtomicInteger(-1);
     private final AtomicInteger processCount = new AtomicInteger(0);
     // 一个bucket中20条traceId
-    private final Set<String> traceIdSet = new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT);
+    private Set<String> traceIdSet = new HashSet<>(Constants.BUCKET_ERR_TRACE_COUNT);
 
     public int getPos() {
         return pos.get();
