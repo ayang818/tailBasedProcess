@@ -39,13 +39,13 @@ public class TextFrameHandler {
                 @Override
                 public void onTextFrame(String payload, boolean finalFragment, int rsv) {
                     // backend向client拉取具体信息
-                    Caller caller = JSON.parseObject(payload, new TypeReference<Caller>() {
-                    });
+                    Caller caller = JSON.parseObject(payload, new TypeReference<Caller>(){});
                     Set<String> errTraceIdSet;
                     int pos;
                     List<Caller.PullDataBucket> pullDataBucketList = caller.getData();
                     List<Resp> data = new ArrayList<>();
                     int len = pullDataBucketList.size();
+                    // *info("开始收集pos {} 前的数据", pullDataBucketList.get(len - 1).pos);
                     for (int i = 0; i < len; i++) {
                         Caller.PullDataBucket pullDataBucket = pullDataBucketList.get(i);
                         errTraceIdSet = pullDataBucket.getErrTraceIdSet();
@@ -54,16 +54,15 @@ public class TextFrameHandler {
                                 pos, data);
                     }
                     // json格式 { "type": Constants.TRACE_DETAIL "data": [ {"data": %s, "dataPos": %d} ] }
-                    DETAIL_THREAD.execute(() -> {
-                        msgBuilder.append("{\"type\":")
-                                .append(Constants.TRACE_DETAIL)
-                                .append(", \"data\":")
-                                .append(JSON.toJSONString(data))
-                                .append("}");
-                        ClientDataStreamHandler.websocket.sendTextFrame(msgBuilder.toString());
-                        msgBuilder.delete(0, msgBuilder.length());
-                    });
-                    // *info("收集 pos {} 前的数据结束", pullDataBucketList.get(len - 1).pos);
+                    final int p = pullDataBucketList.get(len - 1).pos;
+                    msgBuilder.append("{\"type\":")
+                            .append(Constants.TRACE_DETAIL)
+                            .append(", \"data\":")
+                            .append(JSON.toJSONString(data))
+                            .append("}");
+                    ClientDataStreamHandler.websocket.sendTextFrame(msgBuilder.toString());
+                    msgBuilder.delete(0, msgBuilder.length());
+                    // *info("结束收集 pos {} 前的数据", p);
                 }
 
                 @Override

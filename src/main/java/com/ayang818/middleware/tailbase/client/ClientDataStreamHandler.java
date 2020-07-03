@@ -19,6 +19,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.ayang818.middleware.tailbase.Constants.finMsg;
 import static com.ayang818.middleware.tailbase.Constants.standardBytes;
@@ -33,6 +34,8 @@ public class ClientDataStreamHandler implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(ClientDataStreamHandler.class);
     public static WebSocket websocket;
+    private static AtomicInteger updatePos = new AtomicInteger(-1);
+    private static AtomicInteger consumedPos = new AtomicInteger(-1);
     // 行号
     private static volatile long lineCount = 0;
     // 大桶的 pos 不取余，每 Constants.UPDATE_INTERVAL 行，切换大桶
@@ -98,13 +101,16 @@ public class ClientDataStreamHandler implements Runnable {
             traceIndexBucket.tryEnter();
             // use block read
             while (channel.read(byteBuffer) != -1) {
-                long l = System.nanoTime();
                 ((Buffer) byteBuffer).flip();
                 int remain = byteBuffer.remaining();
                 bytes = new byte[remain];
                 System.arraycopy(((Buffer) byteBuffer).array(), 0, bytes, 0, remain);
                 ((Buffer) byteBuffer).clear();
-
+                // 要是消费的速度比不上更新的速度，延缓更新
+                // while (updatePos.get() - consumedPos.get() >= Constants.CLIENT_BIG_BUCKET_COUNT - 20) {
+                //     // *info("睡觉,等待消费 {} {}", updatePos.get(), consumedPos.get());
+                //     Thread.sleep(20);
+                // }
                 // HANDLER_THREAD_POOL.execute(new BlockWorker(bytes, remain));
                 BlockWorker.run(bytes, remain);
             }
@@ -142,6 +148,7 @@ public class ClientDataStreamHandler implements Runnable {
             updateMsgBuilder.append("]}");
             websocket.sendTextFrame(updateMsgBuilder.toString());
             updateMsgBuilder.delete(0, updateMsgBuilder.length());
+            updatePos.set(pos);
             // *info("成功上报pos {} 前的wrongTraceId...", pos);
         }
         // auto clear after update
@@ -157,22 +164,19 @@ public class ClientDataStreamHandler implements Runnable {
      */
     public static void getWrongTracing(Set<String> wrongTraceIdSet, int pos, List<Resp> res) {
         int bucketCount = Constants.CLIENT_BIG_BUCKET_COUNT;
-        // calculate the three continue pos
+        // calculate the three continuous pos
         int curr = pos % bucketCount;
         int prev = (curr - 1 == -1) ? bucketCount - 1 : (curr - 1) % bucketCount;
         int next = (curr + 1 == bucketCount) ? 0 : (curr + 1) % bucketCount;
-        // // *info(String.format("pos: %d, 开始收集 trace details curr: %d, prev: %d, next: %d，三个 " +
-        //         "bucket中的数据", pos, curr, prev, next));
 
         Map<String, List<String>> wrongTraceMap = new HashMap<>(32);
 
-        // TODO: 对于不存在的bucket也需要做回复
-        // these traceId data should be collect
+        // these traceId data should be collected
         getWrongTraceWithBucketPos(prev, pos, wrongTraceIdSet, wrongTraceMap, true);
         getWrongTraceWithBucketPos(curr, pos, wrongTraceIdSet, wrongTraceMap, false);
         getWrongTraceWithBucketPos(next, pos, wrongTraceIdSet, wrongTraceMap, false);
 
-        // // *info(res);
+        consumedPos.set(pos);
         res.add(new Resp(pos, wrongTraceMap));
     }
 

@@ -70,14 +70,13 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         switch (type) {
             case Constants.UPDATE_TYPE:
                 updateThread.execute(() -> {
-                    List<String> data = jsonObject.getObject("data", new TypeReference<List<String>>() {
-                    });
+                    List<String> data = jsonObject.getObject("data", new TypeReference<List<String>>(){});
                     Set<String> badTraceIdSet;
                     int pos;
+                    JSONObject tmp;
                     for (String updateDto : data) {
-                        JSONObject tmp = JSON.parseObject(updateDto);
-                        badTraceIdSet = tmp.getObject("badTraceIdSet", new TypeReference<Set<String>>() {
-                        });
+                        tmp = JSON.parseObject(updateDto);
+                        badTraceIdSet = tmp.getObject("badTraceIdSet", new TypeReference<Set<String>>(){});
                         pos = tmp.getObject("pos", Integer.class);
                         setWrongTraceId(badTraceIdSet, pos);
                     }
@@ -150,7 +149,8 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         Caller caller = new Caller(Constants.PULL_TRACE_DETAIL_TYPE, traceIdBucketList);
         String msg = JSON.toJSONString(caller);
         channels.writeAndFlush(new TextWebSocketFrame(msg));
-        // *info("发送拉取bucket data请求.....");
+        List<Caller.PullDataBucket> data = caller.data;
+        // *info("发送拉取bucket {}前 data请求.....", data.get(data.size() - 1).pos);
     }
 
     /**
@@ -166,8 +166,8 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         if (curPos != -1 && curPos != pos) {
             while (traceIdBucket.getPos() != -1) {
                 try {
-                    Thread.sleep(2);
-                    logger.info("等待 pos {} 被消费, consumePos {}, updatePos {}", pos, consumePos, updatePos);
+                    Thread.sleep(1);
+                    // *info("等待 pos {} 被消费, consumePos {}, updatePos {}", pos, consumePos, updatePos);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }

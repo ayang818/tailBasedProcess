@@ -78,7 +78,9 @@ public class PullDataService implements Runnable {
                     traceIdBucketList.add(new Caller.PullDataBucket(traceIdBucket.getTraceIdSet(), traceIdBucket.getPos()));
                 }
                 // pull data from each client, then MessageHandler will consume these data
-                MessageHandler.pullWrongTraceDetails(traceIdBucketList);
+                if (traceIdBucketList.size() > 0) {
+                    MessageHandler.pullWrongTraceDetails(traceIdBucketList);
+                }
             }
         } catch (InterruptedException e) {
             e.printStackTrace();

@@ -14,7 +14,7 @@ public class Constants {
     // 每间隔2w行上报backend
     public static final int UPDATE_INTERVAL = 20000;
     // client下bigBucket的数量
-    public static final int CLIENT_BIG_BUCKET_COUNT = 100;
+    public static final int CLIENT_BIG_BUCKET_COUNT = 500;
     // client下一个bigBucket中smallBucket的数量
     public static final int CLIENT_SMALL_BUCKET_COUNT = 20;
     // 每读这么多行，切换小桶
