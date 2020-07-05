@@ -45,7 +45,7 @@ public class WSStarter {
                         pipeline.addLast(new HttpObjectAggregator(100 * 1024 * 1024, false));
 
                         pipeline.addLast(new WebSocketServerProtocolHandler("/handle", null,
-                                false, 40960000));
+                                false, 409600000));
                         messageHandler = new MessageHandler();
                         pipeline.addLast(messageHandler);
 
@@ -57,7 +57,7 @@ public class WSStarter {
 
         channelFuture = server.bind(Constants.BACKEND_WEBSOCKET_PORT);
         channelFuture.addListener((ChannelFutureListener) future -> {
-            logger.info("websocket 服务已在 {} 端口启动", Constants.BACKEND_WEBSOCKET_PORT);
+            // *info("websocket 服务已在 {} 端口启动", Constants.BACKEND_WEBSOCKET_PORT);
         });
     }
 }

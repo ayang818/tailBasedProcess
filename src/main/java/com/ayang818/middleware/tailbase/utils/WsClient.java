@@ -24,7 +24,7 @@ public class WsClient {
 
     private static final DefaultAsyncHttpClientConfig config =
             Dsl.config()
-                    .setWebSocketMaxFrameSize(4096000)
+                    .setWebSocketMaxFrameSize(409600000)
                     .setEventLoopGroup(new NioEventLoopGroup(1, new DefaultThreadFactory(
                             "pool-websocket")))
                     .build();
@@ -45,7 +45,7 @@ public class WsClient {
                                 .setRequestTimeout(10000)
                                 .execute(wsHandler)
                                 .get();
-                        logger.info("ws接收长连接建立成功......");
+                        // *info("ws接收长连接建立成功......");
                     } catch (InterruptedException | ExecutionException e) {
                         e.printStackTrace();
                     }

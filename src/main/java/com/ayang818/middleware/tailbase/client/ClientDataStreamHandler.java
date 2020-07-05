@@ -79,11 +79,11 @@ public class ClientDataStreamHandler implements Runnable {
             String path = getPath();
             // process data on client, not server
             if (path == null || "".equals(path)) {
-                logger.warn("path is empty");
+                // *warn("path is empty");
                 return;
             }
             URL url = new URL(path);
-            logger.info("data path:" + path);
+            // *info("data path:" + path);
             // fetch the data source
             HttpURLConnection httpConnection =
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
@@ -115,9 +115,9 @@ public class ClientDataStreamHandler implements Runnable {
             traceIndexBucket.quit();
             callFinish();
             input.close();
-            logger.info("finish");
+            // *info("finish");
         } catch (Exception e) {
-            logger.warn("拉取数据流的过程中产生错误！", e);
+            // *warn("拉取数据流的过程中产生错误！", e);
         }
 
     }
@@ -144,7 +144,7 @@ public class ClientDataStreamHandler implements Runnable {
             websocket.sendTextFrame(updateMsgBuilder.toString());
             updateMsgBuilder.delete(0, updateMsgBuilder.length());
             updatePos.set(pos);
-            logger.info("成功上报pos {} 前的wrongTraceId...", pos);
+            // *info("成功上报pos {} 前的wrongTraceId...", pos);
         }
         // auto clear after update
         errTraceIdSet.clear();
@@ -253,7 +253,7 @@ public class ClientDataStreamHandler implements Runnable {
 
     private void callFinish() {
         websocket.sendTextFrame(finMsg);
-        logger.info("已发送 FIN 请求");
+        // *info("已发送 FIN 请求");
     }
 
     private String getPath() {
@@ -277,9 +277,6 @@ public class ClientDataStreamHandler implements Runnable {
             }
         }
     }
-
-    static long sum = 0;
-    static long time = 0;
 
     /**
      * 处理读取出来的一块数据，作为一个worker直接执行
@@ -374,7 +371,7 @@ public class ClientDataStreamHandler implements Runnable {
                         if (!traceIndexBucket.tryEnter()) {
                             traceIndexBucket.clear();
                             traceIndexBucket.forceEnter();
-                            logger.warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
+                            // *warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
                         }
                     }
                 }
@@ -446,7 +443,7 @@ public class ClientDataStreamHandler implements Runnable {
                 int preBucketPos = (bigBucketPos - 1) < 0 ? Constants.CLIENT_BIG_BUCKET_COUNT - 1 : bigBucketPos % Constants.CLIENT_BIG_BUCKET_COUNT;
                 prePos = DATA_LIST.get(preBucketPos).size() - 1;
                 if (prePos < 0) {
-                    logger.warn("preBucketPos {} 已经被清除...", preBucketPos);
+                    // *warn("preBucketPos {} 已经被清除...", preBucketPos);
                     return;
                 }
             } else {
