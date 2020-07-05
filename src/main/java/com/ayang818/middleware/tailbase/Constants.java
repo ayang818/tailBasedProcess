@@ -14,7 +14,7 @@ public class Constants {
     // 每间隔2w行上报backend
     public static final int UPDATE_INTERVAL = 20000;
     // client下bigBucket的数量
-    public static final int CLIENT_BIG_BUCKET_COUNT = 1400;
+    public static final int CLIENT_BIG_BUCKET_COUNT = 1800;
     // client下一个bigBucket中smallBucket的数量
     public static final int CLIENT_SMALL_BUCKET_COUNT = 20;
     // 每读这么多行，切换小桶
@@ -22,7 +22,7 @@ public class Constants {
     // 保守估计每个traceId下只有2条数据
     public static final int CLIENT_SMALL_BUCKET_MAP_SIZE = UPDATE_INTERVAL / CLIENT_SMALL_BUCKET_COUNT / 2;
     // backend下bucket的数量
-    public static final int BACKEND_BUCKET_COUNT = 1400;
+    public static final int BACKEND_BUCKET_COUNT = 1800;
     // 错误链路id记录set
     public static final int BUCKET_ERR_TRACE_COUNT = 20;
     // 访问次数，取决于client数量

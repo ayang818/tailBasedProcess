@@ -79,11 +79,11 @@ public class ClientDataStreamHandler implements Runnable {
             String path = getPath();
             // process data on client, not server
             if (path == null || "".equals(path)) {
-                // *warn("path is empty");
+                logger.warn("path is empty");
                 return;
             }
             URL url = new URL(path);
-            // *info("data path:" + path);
+            logger.info("data path:" + path);
             // fetch the data source
             HttpURLConnection httpConnection =
                     (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
@@ -115,9 +115,9 @@ public class ClientDataStreamHandler implements Runnable {
             traceIndexBucket.quit();
             callFinish();
             input.close();
-            // *info("finish");
+            logger.info("finish");
         } catch (Exception e) {
-            // *warn("拉取数据流的过程中产生错误！", e);
+            logger.warn("拉取数据流的过程中产生错误！", e);
         }
 
     }
@@ -144,7 +144,7 @@ public class ClientDataStreamHandler implements Runnable {
             websocket.sendTextFrame(updateMsgBuilder.toString());
             updateMsgBuilder.delete(0, updateMsgBuilder.length());
             updatePos.set(pos);
-            // *info("成功上报pos {} 前的wrongTraceId...", pos);
+            logger.info("成功上报pos {} 前的wrongTraceId...", pos);
         }
         // auto clear after update
         errTraceIdSet.clear();
@@ -253,7 +253,7 @@ public class ClientDataStreamHandler implements Runnable {
 
     private void callFinish() {
         websocket.sendTextFrame(finMsg);
-        // *info("已发送 FIN 请求");
+        logger.info("已发送 FIN 请求");
     }
 
     private String getPath() {
@@ -310,8 +310,6 @@ public class ClientDataStreamHandler implements Runnable {
             byte lf = 10;   // \n
             byte bt;
 
-            int judge = 0;
-            int twoCost = 0;
             for (int i = 0; i < remain; i++) {
                 // 124 == |，分隔符
                 bt = bytes[i];
@@ -335,10 +333,10 @@ public class ClientDataStreamHandler implements Runnable {
                         String traceId = new String(bytes, lineStartPos, traceIdEndPos - lineStartPos);
 
                         // TODO 性能瓶颈，如何判断一个span是否是错误的/正确的, tag avg len is 143
-                        boolean isWrongSpan = false;
-                        isWrongSpan = (fastContains(bytes, tagsStartPos, i, standardBytes[1])
-                                && !fastContains(bytes, tagsStartPos, i, standardBytes[2]))
-                                || fastContains(bytes, tagsStartPos, i, standardBytes[0]);
+                        boolean isWrongSpan;
+                        isWrongSpan = !fastContains(bytes,
+                                tagsStartPos, i, standardBytes[2]) && (fastContains(bytes,
+                                tagsStartPos, i, standardBytes[1]) || fastContains(bytes, tagsStartPos, i, standardBytes[0]));
                         handleLine(traceId, isWrongSpan, lineStartPos, lineEndPos);
                         traceIdEndPos = 0;
                         tagsStartPos = 0;
@@ -376,7 +374,7 @@ public class ClientDataStreamHandler implements Runnable {
                         if (!traceIndexBucket.tryEnter()) {
                             traceIndexBucket.clear();
                             traceIndexBucket.forceEnter();
-                            // *warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
+                            logger.warn("强制清空 pos {} innerPos {} 处的数据", pos, innerPos);
                         }
                     }
                 }
@@ -448,7 +446,7 @@ public class ClientDataStreamHandler implements Runnable {
                 int preBucketPos = (bigBucketPos - 1) < 0 ? Constants.CLIENT_BIG_BUCKET_COUNT - 1 : bigBucketPos % Constants.CLIENT_BIG_BUCKET_COUNT;
                 prePos = DATA_LIST.get(preBucketPos).size() - 1;
                 if (prePos < 0) {
-                    // *warn("preBucketPos {} 已经被清除...", preBucketPos);
+                    logger.warn("preBucketPos {} 已经被清除...", preBucketPos);
                     return;
                 }
             } else {

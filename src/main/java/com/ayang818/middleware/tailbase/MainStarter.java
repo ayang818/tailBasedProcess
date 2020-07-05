@@ -32,20 +32,20 @@ public class MainStarter {
     private static String port;
 
     public static void main(String[] args) {
-        // *info(Arrays.toString(args));
+        logger.info(Arrays.toString(args));
         port = System.getProperty("server.port", "8000");
-        // *info("init port={}", port);
+        logger.info("init port={}", port);
         if (BaseUtils.isBackendProcess()) {
             MessageHandler.init();
             // start websocket service
             new WSStarter().run();
             // start consume thread
             PullDataService.start();
-            // *info("数据后端已在 {} 端口启动......", port);
+            logger.info("数据后端已在 {} 端口启动......", port);
         }
         if (BaseUtils.isClientProcess()) {
             ClientDataStreamHandler.init();
-            // *info("数据客户端已在 {} 端口启动......", port);
+            logger.info("数据客户端已在 {} 端口启动......", port);
         }
         // start this application
         MainStarter.start();

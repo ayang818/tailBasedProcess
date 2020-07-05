@@ -60,9 +60,9 @@ public class PullDataService implements Runnable {
                     }
                     Thread.sleep(10);
                     // TODO smaller
-                    if (timer >= 500 && started) {
+                    if (timer >= 200 && started) {
                         // 如果重试次数超过5s，说明程序可能有问题，结束评测，免得等很长时间
-                        // *info("重试时间超过5s，直接发送checkSum");
+                        logger.info("重试时间超过5s，直接发送checkSum");
                         sendCheckSum();
                         flag = true;
                         break;
@@ -97,14 +97,14 @@ public class PullDataService implements Runnable {
             Response response = BaseUtils.callHttp(request);
             if (response.isSuccessful()) {
                 response.close();
-                // *warn("已向评测程序发送checkSum......");
+                logger.warn("已向评测程序发送checkSum......");
                 return true;
             }
-            // *warn("fail to sendCheckSum:" + response.message());
+            logger.warn("fail to sendCheckSum:" + response.message());
             response.close();
             return false;
         } catch (Exception e) {
-            // *warn("fail to call finish", e);
+            logger.warn("fail to call finish", e);
         }
         return false;
     }

@@ -95,7 +95,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
                 break;
             case Constants.FIN_TYPE:
                 int finTime = FIN_TIME.addAndGet(1);
-                // *info("收到 {} 次 Fin请求", finTime);
+                logger.info("收到 {} 次 Fin请求", finTime);
                 break;
             default:
                 break;
@@ -135,7 +135,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             TraceIdBucket traceIdBucket = TRACEID_BUCKET_LIST.get(p);
             traceIdBucket.reset();
             ACK_MAP.remove(posStr);
-            // *info("{} {} 处的bucket消费完毕，清空此处的 bucket, size {}; 当前检测到 {} 条错误链路", p, pos, traceIdBucket.getTraceIdSet().size(), resMap.size());
+            logger.info("{} {} 处的bucket消费完毕，清空此处的 bucket, size {}; 当前检测到 {} 条错误链路", p, pos, traceIdBucket.getTraceIdSet().size(), resMap.size());
         }
         consumePos = Math.max(consumePos, pos);
     }
@@ -150,7 +150,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         String msg = JSON.toJSONString(caller);
         channels.writeAndFlush(new TextWebSocketFrame(msg));
         List<Caller.PullDataBucket> data = caller.data;
-        // *info("发送拉取bucket {}前 data请求.....", data.get(data.size() - 1).pos);
+        logger.info("发送拉取bucket {}前 data请求.....", data.get(data.size() - 1).pos);
     }
 
     /**
@@ -167,7 +167,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
             while (traceIdBucket.getPos() != -1) {
                 try {
                     Thread.sleep(1);
-                    // *info("等待 pos {} 被消费, consumePos {}, updatePos {}", pos, consumePos, updatePos);
+                    logger.info("等待 pos {} 被消费, consumePos {}, updatePos {}", pos, consumePos, updatePos);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -198,7 +198,7 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
         // bucket中元素是否消费完
         for (TraceIdBucket traceIdBucket : TRACEID_BUCKET_LIST) {
             if (traceIdBucket.getPos() != -1) {
-                // *info("{} pos处仍在等待", traceIdBucket.getPos());
+                logger.info("{} pos处仍在等待", traceIdBucket.getPos());
                 return false;
             }
         }
@@ -229,13 +229,13 @@ public class MessageHandler extends SimpleChannelInboundHandler<TextWebSocketFra
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         channels.add(ctx.channel());
-        // *info("添加一条新的连接，当前总共 {} 条连接......", channels.size());
+        logger.info("添加一条新的连接，当前总共 {} 条连接......", channels.size());
     }
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         channels.remove(ctx.channel());
-        // *info("删除一条连接，当前总共 {} 条连接......", channels.size());
+        logger.info("删除一条连接，当前总共 {} 条连接......", channels.size());
     }
 
     public String md5(String key) {

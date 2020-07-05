@@ -33,7 +33,7 @@ public class TextFrameHandler {
                 @Override
                 public void onOpen(WebSocket websocket) {
                     // WebSocket connection opened
-                    // *info("websocket 连接已建立......");
+                    logger.info("websocket 连接已建立......");
                 }
 
                 @Override
@@ -45,7 +45,7 @@ public class TextFrameHandler {
                     List<Caller.PullDataBucket> pullDataBucketList = caller.getData();
                     List<Resp> data = new ArrayList<>();
                     int len = pullDataBucketList.size();
-                    // *info("开始收集pos {} 前的数据", pullDataBucketList.get(len - 1).pos);
+                    logger.info("开始收集pos {} 前的数据", pullDataBucketList.get(len - 1).pos);
                     for (int i = 0; i < len; i++) {
                         Caller.PullDataBucket pullDataBucket = pullDataBucketList.get(i);
                         errTraceIdSet = pullDataBucket.getErrTraceIdSet();
@@ -62,19 +62,19 @@ public class TextFrameHandler {
                             .append("}");
                     ClientDataStreamHandler.websocket.sendTextFrame(msgBuilder.toString());
                     msgBuilder.delete(0, msgBuilder.length());
-                    // *info("结束收集 pos {} 前的数据", p);
+                    logger.info("结束收集 pos {} 前的数据", p);
                 }
 
                 @Override
                 public void onClose(WebSocket websocket, int code, String reason) {
                     // WebSocket connection closed
-                    // *info("websocket 连接已断开......");
+                    logger.info("websocket 连接已断开......");
                 }
 
                 @Override
                 public void onError(Throwable t) {
                     // WebSocket connection error
-                    // *error("websocket 连接发生错误，堆栈信息如下......");
+                    logger.error("websocket 连接发生错误，堆栈信息如下......");
                     t.printStackTrace();
                 }
 

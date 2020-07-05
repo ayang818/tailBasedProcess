@@ -45,7 +45,7 @@ public class WsClient {
                                 .setRequestTimeout(10000)
                                 .execute(wsHandler)
                                 .get();
-                        // *info("ws接收长连接建立成功......");
+                        logger.info("ws接收长连接建立成功......");
                     } catch (InterruptedException | ExecutionException e) {
                         e.printStackTrace();
                     }
