@@ -15,8 +15,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-import static com.ayang818.middleware.tailbase.client.DataStorage.DETAIL_THREAD;
-
 /**
  * @author 杨丰畅
  * @description client 端 websocket 信息处理器
@@ -33,7 +31,7 @@ public class TextFrameHandler {
                 @Override
                 public void onOpen(WebSocket websocket) {
                     // WebSocket connection opened
-                    // *info("websocket 连接已建立......");
+                    logger.info("websocket 连接已建立......");
                 }
 
                 @Override
@@ -74,7 +72,7 @@ public class TextFrameHandler {
                 @Override
                 public void onError(Throwable t) {
                     // WebSocket connection error
-                    // *error("websocket 连接发生错误，堆栈信息如下......");
+                    logger.error("websocket 连接发生错误，堆栈信息如下......");
                     t.printStackTrace();
                 }
 

@@ -75,7 +75,6 @@ public class ClientDataStreamHandler implements Runnable {
     public void run() {
         try {
             websocket = WsClient.getWebsocketClient();
-
             String path = getPath();
             // process data on client, not server
             if (path == null || "".equals(path)) {
@@ -134,7 +133,7 @@ public class ClientDataStreamHandler implements Runnable {
         updateDataQueue.offer(msgBuilder.toString());
         msgBuilder.delete(0, msgBuilder.length());
 
-        if (updateDataQueue.size() >= 20 || isFin) {
+        if (updateDataQueue.size() >= 10 || isFin) {
             updateMsgBuilder.append("{\"type\":").append(Constants.UPDATE_TYPE).append(", \"data\": [");
             while (updateDataQueue.size() > 0) {
                 String tmp = updateDataQueue.poll();
@@ -254,28 +253,6 @@ public class ClientDataStreamHandler implements Runnable {
     private void callFinish() {
         websocket.sendTextFrame(finMsg);
         // *info("已发送 FIN 请求");
-    }
-
-    private String getPath() {
-        String port = System.getProperty("server.port", "8080");
-        String env = System.getProperty("server.env", "prod");
-        if ("prod".equals(env)) {
-            if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-                return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace1.data";
-            } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-                return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace2.data";
-            } else {
-                return null;
-            }
-        } else {
-            if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
-                return "http://localhost:8080/trace1.data";
-            } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
-                return "http://localhost:8080/trace2.data";
-            } else {
-                return null;
-            }
-        }
     }
 
     /**
@@ -523,6 +500,28 @@ public class ClientDataStreamHandler implements Runnable {
                 }
             }
             return false;
+        }
+    }
+
+    private String getPath() {
+        String port = System.getProperty("server.port", "8080");
+        String env = System.getProperty("server.env", "prod");
+        if ("prod".equals(env)) {
+            if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
+                return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace1.data";
+            } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
+                return "http://localhost:" + BasicHttpHandler.getDataSourcePort() + "/trace2.data";
+            } else {
+                return null;
+            }
+        } else {
+            if (Constants.CLIENT_PROCESS_PORT1.equals(port)) {
+                return "http://localhost:8080/trace1.data";
+            } else if (Constants.CLIENT_PROCESS_PORT2.equals(port)) {
+                return "http://localhost:8080/trace2.data";
+            } else {
+                return null;
+            }
         }
     }
 }
